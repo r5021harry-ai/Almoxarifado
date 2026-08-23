@@ -8,9 +8,16 @@ st.caption("Entrada de material — disponível apenas no ambiente administrativ
 conn = get_connection()
 c = conn.cursor()
 
-# Busca os produtos cadastrados para o dropdown
+# Descobre quais colunas existem na tabela 'produtos' para evitar erros de SQL
+c.execute("PRAGMA table_info(produtos)")
+colunas = [col[1] for col in c.fetchall()]
+
+col_qtd = "estoque" if "estoque" in colunas else ("qtd" if "qtd" in colunas else "quantidade")
+col_unidade = "unidade" if "unidade" in colunas else "un"
+
+# Busca os produtos com a coluna correta
 try:
-    c.execute("SELECT id, codigo, nome, unidade, quantidade FROM produtos ORDER BY nome ASC")
+    c.execute(f"SELECT id, codigo, nome, {col_unidade}, {col_qtd} FROM produtos ORDER BY nome ASC")
     produtos = c.fetchall()
 except Exception as e:
     produtos = []
@@ -22,9 +29,9 @@ if not produtos:
     st.warning("Nenhum produto cadastrado para dar entrada.")
     st.stop()
 
-# Monta o dicionário para a caixa de seleção
+# Monta as opções para o dropdown
 opcoes_produtos = {
-    f"{p['nome']} ({p['codigo'] or 'S/C'}) — estoque atual: {p['quantidade']} {p['unidade'] or 'UN'}": p['id']
+    f"{p['nome']} ({p['codigo'] or 'S/C'}) — estoque atual: {p[col_qtd]} {p[col_unidade] or 'UN'}": p['id']
     for p in produtos
 }
 
@@ -43,7 +50,7 @@ if btn_confirmar:
     data_hora = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     usuario_nome = st.session_state.usuario.get("nome", "Administrador") if st.session_state.get("usuario") else "Sistema"
 
-    # Concatena o fornecedor e valor unitário na observação da movimentação para registro histórico
+    # Junta fornecedor e valor unitário na observação da movimentação
     obs_completa = f"Fornecedor: {fornecedor.strip()} | Valor Un.: R$ {valor_unitario:.2f}"
     if observacao.strip():
         obs_completa += f" | Obs: {observacao.strip()}"
@@ -52,10 +59,10 @@ if btn_confirmar:
     c = conn.cursor()
 
     try:
-        # Atualiza a quantidade do produto em estoque
-        c.execute("UPDATE produtos SET quantidade = quantidade + ? WHERE id = ?", (quantidade, produto_id))
+        # Atualiza a quantidade do produto no banco usando o nome correto da coluna
+        c.execute(f"UPDATE produtos SET {col_qtd} = {col_qtd} + ? WHERE id = ?", (quantidade, produto_id))
         
-        # Registra a movimentação de ENTRADA
+        # Registra a movimentação
         c.execute("""
             INSERT INTO movimentacoes (produto_id, tipo, quantidade, usuario, observacao, data_hora)
             VALUES (?, 'ENTRADA', ?, ?, ?, ?)
