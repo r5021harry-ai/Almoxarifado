@@ -9,17 +9,18 @@ st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
 if not os.path.exists(DB_PATH):
     init_db()
 
-# Customização Visual das Abas no Topo
+# ---------------------------------------------------------------------
+# ESTILIZAÇÃO DO MENU SUPERIOR (ABAS)
+# ---------------------------------------------------------------------
 st.markdown(
     """
     <style>
         [data-testid="stSidebarNav"] { display: none !important; }
         
-        /* Modifica o radio button para parecer abas / botões */
         div[role="radiogroup"] {
             flex-direction: row !important;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
         div[role="radiogroup"] label {
             background-color: #1e293b !important;
@@ -30,10 +31,6 @@ st.markdown(
         }
         div[role="radiogroup"] label:hover {
             border-color: #60a5fa !important;
-        }
-        /* Esconde o círculo do radio button */
-        div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
-            font-weight: 500;
         }
     </style>
     """,
@@ -66,7 +63,7 @@ if st.session_state.usuario is None:
     st.stop()
 
 # ---------------------------------------------------------------------
-# BARRA LATERAL & MÓDULOS
+# BARRA LATERAL (USUÁRIO E LOGOUT)
 # ---------------------------------------------------------------------
 usuario = st.session_state.usuario
 
@@ -81,6 +78,9 @@ with st.sidebar:
         st.session_state.usuario = None
         st.rerun()
 
+# ---------------------------------------------------------------------
+# MENU SUPERIOR EM ABAS
+# ---------------------------------------------------------------------
 opcoes_menu = [
     "🏠 Dashboard", "📱 Nova Saída", "📥 Nova Entrada", 
     "📦 Produtos", "👷 Funcionários", "🚗 Veículos", 
@@ -90,41 +90,33 @@ opcoes_menu = [
 if usuario.get("role") == "admin":
     opcoes_menu.append("🔐 Usuários")
 
-# Renderização do Menu Superior
 opcao_selecionada = st.radio("Navegação", opcoes_menu, label_visibility="collapsed")
 st.divider()
 
-# ---------------------------------------------------------------------
-# EXECUÇÃO DA VIEW SELECIONADA
-# ---------------------------------------------------------------------
-from views import (
-    dashboard, nova_saida, entrada, produtos,
-    funcionarios, veiculos, requisicoes, relatorios, qrcodes
-)
-
-try:
-    from views import usuarios
-except ImportError:
-    usuarios = None
-
-def renderizar(modulo):
-    if hasattr(modulo, 'render'):
-        modulo.render()
-    elif hasattr(modulo, 'main'):
-        modulo.main()
-
-mapa_views = {
-    "🏠 Dashboard": dashboard,
-    "📱 Nova Saída": nova_saida,
-    "📥 Nova Entrada": entrada,
-    "📦 Produtos": produtos,
-    "👷 Funcionários": funcionarios,
-    "🚗 Veículos": veiculos,
-    "📋 Requisições": requisicoes,
-    "📊 Relatórios": relatorios,
-    "🏷️ QR Codes": qrcodes,
-    "🔐 Usuários": usuarios
+# Mapeamento do nome do botão para o caminho exato do arquivo na pasta views
+mapa_arquivos = {
+    "🏠 Dashboard": "views/dashboard.py",
+    "📱 Nova Saída": "views/nova_saida.py",
+    "📥 Nova Entrada": "views/entrada.py",
+    "📦 Produtos": "views/produtos.py",
+    "👷 Funcionários": "views/funcionarios.py",
+    "🚗 Veículos": "views/veiculos.py",
+    "📋 Requisições": "views/requisicoes.py",
+    "📊 Relatórios": "views/relatorios.py",
+    "🏷️ QR Codes": "views/qrcodes.py",
+    "🔐 Usuários": "views/usuarios.py"
 }
 
-if opcao_selecionada in mapa_views and mapa_views[opcao_selecionada]:
-    renderizar(mapa_views[opcao_selecionada])
+# ---------------------------------------------------------------------
+# EXECUÇÃO DIRETA DO ARQUIVO SELECIONADO
+# ---------------------------------------------------------------------
+caminho_arquivo = mapa_arquivos.get(opcao_selecionada)
+
+if caminho_arquivo and os.path.exists(caminho_arquivo):
+    with open(caminho_arquivo, "r", encoding="utf-8") as f:
+        codigo = f.read()
+    
+    # Executa o arquivo da view dentro do contexto do app principal
+    exec(compile(codigo, caminho_arquivo, "exec"))
+else:
+    st.error(f"O arquivo `{caminho_arquivo}` não foi encontrado na pasta `views/`.")
