@@ -1,73 +1,90 @@
 import streamlit as st
-import secrets
-from database.db import get_connection, hash_pin
+import pandas as pd
+from database.db import get_connection
 
-st.markdown("## 🔐 Gestão de Usuários")
+usuario_logado = st.session_state.get("usuario", {})
 
-with st.form("form_usuario", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        nome = st.text_input("Nome Completo")
-        username = st.text_input("Nome de Usuário (Login)")
-    with col2:
-        pin = st.text_input("PIN (Senha Numérica)", type="password")
-        role = st.selectbox("Perfil de Acesso", ["almoxarife", "admin"])
-        
-    btn_salvar = st.form_submit_button("➕ Criar Usuário", use_container_width=True)
+# Proteção adicional de acesso (apenas Administrador)
+if usuario_logado.get("role") != "admin":
+    st.error("⛔ Acesso negado. Apenas administradores podem gerenciar usuários.")
+    st.stop()
 
-if btn_salvar:
-    if nome.strip() and username.strip() and pin.strip():
-        conn = get_connection()
-        c = conn.cursor()
-        
-        # Criptografa o PIN
-        salt = secrets.token_hex(8)
-        pin_hashed = hash_pin(pin.strip(), salt)
-        stored_hash = f"{salt}${pin_hashed}"
-        
-        try:
-            c.execute(
-                "INSERT INTO usuarios (nome, username, pin_hash, role, status) VALUES (?, ?, ?, ?, 'Ativo')",
-                (nome.strip(), username.strip().lower(), stored_hash, role)
-            )
-            conn.commit()
-            st.success(f"Usuário '{username}' cadastrado com sucesso!")
-            st.rerun()
-        except Exception as e:
-            conn.rollback()
-            if "UNIQUE" in str(e):
-                st.error(f"O usuário '{username}' já existe. Escolha outro login.")
-            else:
-                st.error(f"Erro ao salvar usuário: {e}")
-        finally:
-            conn.close()
+st.markdown("## 🔐 Gerenciamento de Usuários")
+
+tab_listar, tab_cadastrar = st.tabs(["📋 Usuários Cadastrados", "➕ Novo Usuário"])
+
+# ---------------------------------------------------------------------
+# ABA 1: LISTAR E EXCLUIR USUÁRIOS
+# ---------------------------------------------------------------------
+with tab_listar:
+    conn = get_connection()
+    df_usuarios = pd.read_sql_query("SELECT id, username, nome, role FROM usuarios ORDER BY nome", conn)
+    conn.close()
+
+    if df_usuarios.empty:
+        st.info("Nenhum usuário encontrado.")
     else:
-        st.warning("Preencha todos os campos do formulário.")
-
-st.markdown("---")
-
-# Listagem dos Usuários
-conn = get_connection()
-c = conn.cursor()
-c.execute("SELECT id, nome, username, role, status FROM usuarios ORDER BY id DESC")
-usuarios = [dict(r) for r in c.fetchall()]
-conn.close()
-
-if usuarios:
-    for u in usuarios:
-        col_n, col_u, col_r, col_s, col_b = st.columns([3, 2, 2, 2, 2])
-        col_n.write(u["nome"])
-        col_u.write(f"`{u['username']}`")
-        col_r.write(u["role"])
-        col_s.write(u["status"])
+        st.markdown("### Lista de Usuários do Sistema")
         
-        novo_status = "Inativo" if u["status"] == "Ativo" else "Ativo"
-        if col_b.button(f"Marcar {novo_status}", key=f"btn_usr_{u['id']}"):
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("UPDATE usuarios SET status = ? WHERE id = ?", (novo_status, u["id"]))
-            conn.commit()
-            conn.close()
-            st.rerun()
-else:
-    st.info("Nenhum usuário cadastrado.")
+        # Cabeçalho da tabela
+        col_hdr = st.columns([1.5, 3, 2, 1])
+        col_hdr[0].markdown("**Usuário**")
+        col_hdr[1].markdown("**Nome Completo**")
+        col_hdr[2].markdown("**Perfil / Permissão**")
+        col_hdr[3].markdown("**Ação**")
+
+        st.divider()
+
+        for user in df_usuarios.to_dict('records'):
+            cols = st.columns([1.5, 3, 2, 1])
+            cols[0].write(f"`{user['username']}`")
+            cols[1].write(user['nome'])
+            cols[2].write("⚙️ Administrador" if user['role'] == "admin" else "👤 Operador")
+
+            # Evita que o admin apague a própria conta em uso
+            if user['username'] == usuario_logado.get('username'):
+                cols[3].caption("Conta Atual")
+            else:
+                if cols[3].button("🗑️ Excluir", key=f"btn_del_user_{user['id']}", help="Excluir usuário"):
+                    conn = get_connection()
+                    c = conn.cursor()
+                    c.execute("DELETE FROM usuarios WHERE id = ?", (user['id'],))
+                    conn.commit()
+                    conn.close()
+                    st.toast(f"Usuário '{user['username']}' excluído com sucesso!", icon="🗑️")
+                    st.rerun()
+
+# ---------------------------------------------------------------------
+# ABA 2: CADASTRAR NOVO USUÁRIO
+# ---------------------------------------------------------------------
+with tab_cadastrar:
+    st.markdown("### Cadastrar Novo Acesso")
+    with st.form("form_novo_usuario"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nome = st.text_input("Nome Completo *")
+            username = st.text_input("Nome de Usuário (Login) *")
+        with col2:
+            pin = st.text_input("PIN (Senha numéricas/texto) *", type="password")
+            role = st.selectbox("Perfil de Acesso", ["operador", "admin"], format_func=lambda x: "⚙️ Administrador" if x == "admin" else "👤 Operador")
+
+        salvar_usr = st.form_submit_button("💾 Salvar Usuário", use_container_width=True)
+
+        if salvar_usr:
+            if not nome.strip() or not username.strip() or not pin.strip():
+                st.error("Todos os campos obrigatórios devem ser preenchidos.")
+            else:
+                conn = get_connection()
+                c = conn.cursor()
+                try:
+                    c.execute("""
+                        INSERT INTO usuarios (username, nome, pin, role)
+                        VALUES (?, ?, ?, ?)
+                    """, (username.strip(), nome.strip(), pin.strip(), role))
+                    conn.commit()
+                    st.success(f"Usuário '{username.strip()}' criado com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar usuário (o nome de usuário já pode existir): {e}")
+                finally:
+                    conn.close()
