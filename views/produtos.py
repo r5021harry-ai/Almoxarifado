@@ -74,6 +74,17 @@ with tab_listar:
 
         for row in df_exibir.to_dict('records'):
             prod_id = row['id']
+            
+            # Tratamento seguro para preço unitário (evita KeyError / NoneType error)
+            preco_val = row.get('preco_unitario')
+            if preco_val is None or pd.isna(preco_val):
+                preco_str = "R$ 0,00"
+            else:
+                try:
+                    preco_str = f"R$ {float(preco_val):.2f}"
+                except (ValueError, TypeError):
+                    preco_str = "R$ 0,00"
+
             if is_admin:
                 cols = st.columns([0.6, 1.2, 3, 1.5, 1.2, 1, 1.5, 1])
                 
@@ -85,12 +96,12 @@ with tab_listar:
                 if marcado:
                     produtos_para_excluir.append(prod_id)
 
-                cols[1].write(row['codigo'])
-                cols[2].write(row['nome'])
-                cols[3].write(row['categoria'] or "-")
-                cols[4].write(f"{row['estoque_atual']}")
-                cols[5].write(row['unidade'])
-                cols[6].write(f"R$ {row['preco_unitario']:.2f}")
+                cols[1].write(row.get('codigo', ''))
+                cols[2].write(row.get('nome', ''))
+                cols[3].write(row.get('categoria') if row.get('categoria') else "-")
+                cols[4].write(f"{row.get('estoque_atual', 0)}")
+                cols[5].write(row.get('unidade', 'UN'))
+                cols[6].write(preco_str)
 
                 # Botão Excluir individual
                 if cols[7].button("🗑️", key=f"btn_del_ind_{prod_id}", help="Excluir este produto"):
@@ -99,16 +110,16 @@ with tab_listar:
                     c.execute("DELETE FROM produtos WHERE id = ?", (prod_id,))
                     conn.commit()
                     conn.close()
-                    st.toast(f"Produto '{row['nome']}' excluído com sucesso!", icon="🗑️")
+                    st.toast(f"Produto '{row.get('nome')}' excluído com sucesso!", icon="🗑️")
                     st.rerun()
             else:
                 cols = st.columns([1.2, 3, 1.5, 1.2, 1, 1.5])
-                cols[0].write(row['codigo'])
-                cols[1].write(row['nome'])
-                cols[2].write(row['categoria'] or "-")
-                cols[3].write(f"{row['estoque_atual']}")
-                cols[4].write(row['unidade'])
-                cols[5].write(f"R$ {row['preco_unitario']:.2f}")
+                cols[0].write(row.get('codigo', ''))
+                cols[1].write(row.get('nome', ''))
+                cols[2].write(row.get('categoria') if row.get('categoria') else "-")
+                cols[3].write(f"{row.get('estoque_atual', 0)}")
+                cols[4].write(row.get('unidade', 'UN'))
+                cols[5].write(preco_str)
 
         # BOTÃO PARA APAGAR SELECIONADOS EM MASSA (ADMIN)
         if is_admin and produtos_para_excluir:
