@@ -8,32 +8,37 @@ st.caption("Entrada de material — disponível apenas no ambiente administrativ
 conn = get_connection()
 c = conn.cursor()
 
-# Descobre quais colunas existem na tabela 'produtos' para evitar erros de SQL
-c.execute("PRAGMA table_info(produtos)")
-colunas = [col[1] for col in c.fetchall()]
-
-col_qtd = "estoque" if "estoque" in colunas else ("qtd" if "qtd" in colunas else "quantidade")
-col_unidade = "unidade" if "unidade" in colunas else "un"
-
-# Busca os produtos com a coluna correta
+# Busca todos os produtos do banco
 try:
-    c.execute(f"SELECT id, codigo, nome, {col_unidade}, {col_qtd} FROM produtos ORDER BY nome ASC")
-    produtos = c.fetchall()
+    c.execute("SELECT * FROM produtos ORDER BY nome ASC")
+    rows = c.fetchall()
+    # Converte os registros para dicionários padronizados independente do driver SQLite
+    produtos = [dict(row) for row in rows]
 except Exception as e:
     produtos = []
     st.error(f"Erro ao carregar produtos: {e}")
-
-conn.close()
+finally:
+    conn.close()
 
 if not produtos:
     st.warning("Nenhum produto cadastrado para dar entrada.")
     st.stop()
 
-# Monta as opções para o dropdown
-opcoes_produtos = {
-    f"{p['nome']} ({p['codigo'] or 'S/C'}) — estoque atual: {p[col_qtd]} {p[col_unidade] or 'UN'}": p['id']
-    for p in produtos
-}
+# Identifica dinamicamente os nomes das colunas no seu banco
+primeiro_prod = produtos[0]
+col_qtd = next((k for k in ['quantidade', 'estoque', 'qtd'] if k in primeiro_prod), None)
+col_unidade = next((k for k in ['unidade', 'un'] if k in primeiro_prod), None)
+
+# Monta o dicionário de opções para o dropdown
+opcoes_produtos = {}
+for p in produtos:
+    nome = p.get('nome', 'Sem nome')
+    codigo = p.get('codigo') or 'S/C'
+    qtd = p.get(col_qtd, 0) if col_qtd else 0
+    unidade = p.get(col_unidade, 'UN') if col_unidade else 'UN'
+    
+    label = f"{nome} ({codigo}) — estoque atual: {qtd} {unidade}"
+    opcoes_produtos[label] = p['id']
 
 produto_selecionado = st.selectbox("Produto", list(opcoes_produtos.keys()))
 
@@ -50,7 +55,7 @@ if btn_confirmar:
     data_hora = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     usuario_nome = st.session_state.usuario.get("nome", "Administrador") if st.session_state.get("usuario") else "Sistema"
 
-    # Junta fornecedor e valor unitário na observação da movimentação
+    # Monta o histórico na observação com o Valor Unitário e Fornecedor
     obs_completa = f"Fornecedor: {fornecedor.strip()} | Valor Un.: R$ {valor_unitario:.2f}"
     if observacao.strip():
         obs_completa += f" | Obs: {observacao.strip()}"
@@ -59,10 +64,10 @@ if btn_confirmar:
     c = conn.cursor()
 
     try:
-        # Atualiza a quantidade do produto no banco usando o nome correto da coluna
+        # Atualiza a quantidade do estoque dinamicamente
         c.execute(f"UPDATE produtos SET {col_qtd} = {col_qtd} + ? WHERE id = ?", (quantidade, produto_id))
         
-        # Registra a movimentação
+        # Registra a movimentação de ENTRADA
         c.execute("""
             INSERT INTO movimentacoes (produto_id, tipo, quantidade, usuario, observacao, data_hora)
             VALUES (?, 'ENTRADA', ?, ?, ?, ?)
