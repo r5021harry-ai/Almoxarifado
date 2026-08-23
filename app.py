@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import streamlit as st
 from database.db import init_db, verify_pin, DB_PATH
 
-# Configuração da página DEVE ser o primeiro comando Streamlit
+# Configuração da página
 st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
 
 if not os.path.exists(DB_PATH):
@@ -16,6 +16,9 @@ st.markdown(
     <style>
         [data-testid="stSidebarNav"] {
             display: none !important;
+        }
+        .block-container {
+            padding-top: 2rem !important;
         }
     </style>
     """,
@@ -50,10 +53,8 @@ if st.session_state.usuario is None:
                 st.rerun()
             else:
                 st.error("Usuário ou PIN inválido.")
-                
-        st.caption("Usuário padrão: admin / PIN: 1234 (troque depois em Usuários).")
     
-    # Interrompe a execução aqui para NÃO carregar as abas ou mensagens de aviso
+    # Interrompe a execução para impedir exibição das abas sem autenticação
     st.stop()
 
 # ---------------------------------------------------------------------
@@ -75,7 +76,7 @@ usuario = st.session_state.usuario
 with st.sidebar:
     st.markdown("### 📦 **Almoxarifado**")
     st.divider()
-    st.markdown(f"**Conectado como:**")
+    st.markdown("**Conectado como:**")
     st.markdown(f"### `{usuario.get('nome', 'Usuário')}`")
     st.caption(f"Perfil: {usuario.get('role', 'user')}")
     st.write("")
