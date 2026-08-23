@@ -5,10 +5,14 @@ from database.db import get_connection
 
 st.markdown("## 📦 Gestão de Produtos")
 
+# Recupera as informações do usuário logado na sessão
+usuario_logado = st.session_state.get("usuario", {})
+is_admin = usuario_logado.get("role") == "admin"
+
 tab_listar, tab_cadastrar, tab_importar = st.tabs(["📋 Lista de Produtos", "➕ Cadastrar Produto", "📥 Importar Excel"])
 
 # ---------------------------------------------------------------------
-# ABA 1: LISTAR PRODUTOS
+# ABA 1: LISTAR E EXCLUIR PRODUTOS
 # ---------------------------------------------------------------------
 with tab_listar:
     conn = get_connection()
@@ -27,22 +31,102 @@ with tab_listar:
         else:
             df_exibir = df_produtos
 
-        st.dataframe(
-            df_exibir,
-            use_container_width=True,
-            column_config={
-                "id": "ID",
-                "codigo": "Código",
-                "nome": "Nome do Produto",
-                "categoria": "Categoria",
-                "estoque_atual": "Estoque",
-                "unidade": "UN",
-                "preco_unitario": st.column_config.NumberColumn("Preço Un. (R$)", format="R$ %.2f"),
-                "minimo": "Estoque Mín.",
-                "status": "Status"
-            },
-            hide_index=True
-        )
+        # EXCLUSÃO EM MASSA / SELEÇÃO (EXCLUSIVO ADMIN)
+        if is_admin:
+            st.markdown("---")
+            col_sel1, col_sel2, _ = st.columns([1.5, 1.5, 3])
+            
+            if col_sel1.button("✅ Selecionar Todos para Ação"):
+                for prod_id in df_exibir['id']:
+                    st.session_state[f"del_prod_{prod_id}"] = True
+                st.rerun()
+
+            if col_sel2.button("❌ Desmarcar Todos"):
+                for prod_id in df_exibir['id']:
+                    st.session_state[f"del_prod_{prod_id}"] = False
+                st.rerun()
+
+            st.write("")
+
+        # CABEÇALHO DA TABELA
+        if is_admin:
+            col_hdr = st.columns([0.6, 1.2, 3, 1.5, 1.2, 1, 1.5, 1])
+            col_hdr[0].markdown("**Excluir**")
+            col_hdr[1].markdown("**Código**")
+            col_hdr[2].markdown("**Nome do Produto**")
+            col_hdr[3].markdown("**Categoria**")
+            col_hdr[4].markdown("**Estoque**")
+            col_hdr[5].markdown("**UN**")
+            col_hdr[6].markdown("**Preço Un. (R$)**")
+            col_hdr[7].markdown("**Ação**")
+        else:
+            col_hdr = st.columns([1.2, 3, 1.5, 1.2, 1, 1.5])
+            col_hdr[0].markdown("**Código**")
+            col_hdr[1].markdown("**Nome do Produto**")
+            col_hdr[2].markdown("**Categoria**")
+            col_hdr[3].markdown("**Estoque**")
+            col_hdr[4].markdown("**UN**")
+            col_hdr[5].markdown("**Preço Un. (R$)**")
+
+        st.divider()
+
+        produtos_para_excluir = []
+
+        for row in df_exibir.to_dict('records'):
+            prod_id = row['id']
+            if is_admin:
+                cols = st.columns([0.6, 1.2, 3, 1.5, 1.2, 1, 1.5, 1])
+                
+                key_chk = f"del_prod_{prod_id}"
+                if key_chk not in st.session_state:
+                    st.session_state[key_chk] = False
+                
+                marcado = cols[0].checkbox("", key=key_chk, label_visibility="collapsed")
+                if marcado:
+                    produtos_para_excluir.append(prod_id)
+
+                cols[1].write(row['codigo'])
+                cols[2].write(row['nome'])
+                cols[3].write(row['categoria'] or "-")
+                cols[4].write(f"{row['estoque_atual']}")
+                cols[5].write(row['unidade'])
+                cols[6].write(f"R$ {row['preco_unitario']:.2f}")
+
+                # Botão Excluir individual
+                if cols[7].button("🗑️", key=f"btn_del_ind_{prod_id}", help="Excluir este produto"):
+                    conn = get_connection()
+                    c = conn.cursor()
+                    c.execute("DELETE FROM produtos WHERE id = ?", (prod_id,))
+                    conn.commit()
+                    conn.close()
+                    st.toast(f"Produto '{row['nome']}' excluído com sucesso!", icon="🗑️")
+                    st.rerun()
+            else:
+                cols = st.columns([1.2, 3, 1.5, 1.2, 1, 1.5])
+                cols[0].write(row['codigo'])
+                cols[1].write(row['nome'])
+                cols[2].write(row['categoria'] or "-")
+                cols[3].write(f"{row['estoque_atual']}")
+                cols[4].write(row['unidade'])
+                cols[5].write(f"R$ {row['preco_unitario']:.2f}")
+
+        # BOTÃO PARA APAGAR SELECIONADOS EM MASSA (ADMIN)
+        if is_admin and produtos_para_excluir:
+            st.divider()
+            st.warning(f"⚠️ **{len(produtos_para_excluir)}** produto(s) selecionado(s) para exclusão.")
+            if st.button(f"🚨 Excluir os {len(produtos_para_excluir)} Produto(s) Selecionados", type="primary"):
+                conn = get_connection()
+                c = conn.cursor()
+                c.executemany("DELETE FROM produtos WHERE id = ?", [(pid,) for pid in produtos_para_excluir])
+                conn.commit()
+                conn.close()
+
+                # Limpa do session state
+                for pid in produtos_para_excluir:
+                    st.session_state.pop(f"del_prod_{pid}", None)
+
+                st.success(f"{len(produtos_para_excluir)} produto(s) excluído(s) com sucesso!")
+                st.rerun()
 
 # ---------------------------------------------------------------------
 # ABA 2: CADASTRAR PRODUTO MANUALMENTE
@@ -93,7 +177,6 @@ with tab_importar:
     3. Caso o código do produto já exista no banco de dados, os dados desse produto serão **atualizados**.
     """)
 
-    # Botão para baixar modelo de planilha de exemplo
     modelo_df = pd.DataFrame([{
         "codigo": "9794",
         "nome": "TERMINAL DIRECAO CAMINHAO VW F12000 - LD",
@@ -123,11 +206,8 @@ with tab_importar:
     if arquivo_excel is not None:
         try:
             df_import = pd.read_excel(arquivo_excel)
-            
-            # Normaliza os nomes das colunas para minúsculo
             df_import.columns = [str(col).strip().lower() for col in df_import.columns]
             
-            # Validação de colunas obrigatórias
             colunas_obrigatorias = {"codigo", "nome"}
             if not colunas_obrigatorias.issubset(df_import.columns):
                 st.error("❌ A planilha precisa conter pelo menos as colunas **codigo** e **nome**.")
@@ -157,7 +237,6 @@ with tab_importar:
                         mn = float(row.get("minimo", 0)) if pd.notna(row.get("minimo")) else 0.0
 
                         try:
-                            # Tenta inserir, se já existir o código atualiza (UPSERT)
                             c.execute("""
                                 INSERT INTO produtos (codigo, nome, categoria, unidade, estoque_atual, preco_unitario, minimo, status)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Ativo')
@@ -171,8 +250,7 @@ with tab_importar:
                                     status = 'Ativo'
                             """, (cod, nm, cat, un, est_atual, prc, mn))
                             sucessos += 1
-                        except Exception as ex:
-                            # Caso a tabela não tenha restrição UNIQUE em codigo no SQLite, faz busca manual
+                        except Exception:
                             c.execute("SELECT id FROM produtos WHERE codigo = ?", (cod,))
                             prod_existente = c.fetchone()
 
