@@ -11,30 +11,33 @@ from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+# ⚠️ ALTERE AQUI PARA O IP DA SUA MÁQUINA NA REDE OU LINK WEB
+# Exemplo Local: "http://192.168.1.50:8501"
+# Exemplo Nuvem: "https://meualmoxarifado.streamlit.app"
+URL_BASE_SISTEMA = "http://192.168.1.50:8501"
+
 st.markdown("## 🏷️ Gerenciar QR Codes")
 
 conn = get_connection()
-df_produtos = pd.read_sql_query("SELECT id, codigo, nome FROM produtos WHERE status='Ativo' ORDER BY nome", conn)
+df_produtos = pd.read_sql_query("SELECT id, codigo, nome, estoque_atual, unidade FROM produtos WHERE status='Ativo' ORDER BY nome", conn)
 conn.close()
 
 if df_produtos.empty:
     st.info("Nenhum produto cadastrado para gerar QR Code.")
     st.stop()
 
-# BARRA DE BUSCA
 busca = st.text_input("🔍 Buscar produto", placeholder="Digite o nome ou código...")
 
 if busca:
     df_filtrado = df_produtos[
         df_produtos['nome'].str.contains(busca, case=False, na=False) | 
-        df_produtos['codigo'].str.contains(busca, case=False, na=False)
+        df_produtos['codigo'].astype(str).str.contains(busca, case=False, na=False)
     ]
 else:
     df_filtrado = df_produtos
 
 st.caption(f"{len(df_filtrado)} produto(s) encontrado(s)")
 
-# LÓGICA DOS BOTÕES DE MARCAR / DESMARCAR TODOS
 col_a, col_b, _ = st.columns([1.5, 1.5, 3])
 
 if col_a.button("✅ Selecionar Todos"):
@@ -47,7 +50,6 @@ if col_b.button("❌ Desmarcar Todos"):
         st.session_state[f"qr_{prod['id']}"] = False
     st.rerun()
 
-# EXIBIÇÃO DOS CHECKBOXES EM 4 COLUNAS
 produtos_selecionados = []
 cols = st.columns(4)
 
@@ -55,7 +57,6 @@ for i, row in enumerate(df_filtrado.to_dict('records')):
     col_idx = i % 4
     key_name = f"qr_{row['id']}"
     
-    # Inicializa o estado como False caso ainda não exista no session_state
     if key_name not in st.session_state:
         st.session_state[key_name] = False
 
@@ -69,7 +70,6 @@ for i, row in enumerate(df_filtrado.to_dict('records')):
 
 st.markdown("---")
 
-# GERADOR DE PDF DAS ETIQUETAS
 def gerar_pdf_etiquetas(lista_produtos):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
@@ -112,9 +112,11 @@ def gerar_pdf_etiquetas(lista_produtos):
         c.setStrokeColorRGB(0.9, 0.9, 0.9)
         c.line(x + 2*mm, y + altura_etiqueta - 6*mm, x + largura_etiqueta - 2*mm, y + altura_etiqueta - 6*mm)
 
-        # 2. QR CODE
+        # 2. GERAR QR CODE COM A URL
+        link_produto = f"{URL_BASE_SISTEMA}/?p={prod['codigo']}"
+        
         qr = qrcode.QRCode(box_size=3, border=1)
-        qr.add_data(prod['codigo'])
+        qr.add_data(link_produto)
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white")
         
@@ -125,7 +127,7 @@ def gerar_pdf_etiquetas(lista_produtos):
         reader = ImageReader(img_buffer)
         c.drawImage(reader, x + 2*mm, y + 2*mm, width=24*mm, height=24*mm)
 
-        # 3. NOME COMPLETO DO PRODUTO
+        # 3. NOME DO PRODUTO
         p_nome = Paragraph(prod['nome'], estilo_produto)
         p_nome.wrapOn(c, 31*mm, 16*mm)
         p_nome.drawOn(c, x + 27*mm, y + 10*mm)
@@ -149,7 +151,6 @@ def gerar_pdf_etiquetas(lista_produtos):
     buffer.seek(0)
     return buffer.getvalue()
 
-# BOTÃO DE IMPRESSÃO
 if produtos_selecionados:
     pdf_data = gerar_pdf_etiquetas(produtos_selecionados)
     
