@@ -4,7 +4,61 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import streamlit as st
 from database.db import init_db, verify_pin, DB_PATH
 
-# Importação dos módulos de visualização
+# Configuração da página DEVE ser o primeiro comando Streamlit
+st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
+
+if not os.path.exists(DB_PATH):
+    init_db()
+
+# Esconde qualquer menu automático da barra lateral
+st.markdown(
+    """
+    <style>
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ---------------------------------------------------------------------
+# GERENCIAMENTO DE SESSÃO / LOGIN
+# ---------------------------------------------------------------------
+if "usuario" not in st.session_state:
+    st.session_state.usuario = None
+
+# SE NÃO ESTIVER LOGADO, MOSTRA APENAS A TELA DE LOGIN
+if st.session_state.usuario is None:
+    # Oculta a sidebar na tela de login
+    st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.title("📦 Almoxarifado")
+        st.subheader("Acesso ao Sistema")
+        
+        with st.form("login_form"):
+            username = st.text_input("Usuário")
+            pin = st.text_input("PIN", type="password")
+            entrar = st.form_submit_button("Entrar", use_container_width=True)
+            
+        if entrar:
+            user = verify_pin(username.strip(), pin.strip())
+            if user:
+                st.session_state.usuario = dict(user)
+                st.rerun()
+            else:
+                st.error("Usuário ou PIN inválido.")
+                
+        st.caption("Usuário padrão: admin / PIN: 1234 (troque depois em Usuários).")
+    
+    # Interrompe a execução aqui para NÃO carregar as abas ou mensagens de aviso
+    st.stop()
+
+# ---------------------------------------------------------------------
+# USUÁRIO LOGADO — IMPORTS DAS VIEWS
+# ---------------------------------------------------------------------
 from views import (
     dashboard, nova_saida, entrada, produtos,
     funcionarios, veiculos, requisicoes, relatorios, qrcodes
@@ -15,73 +69,22 @@ try:
 except ImportError:
     usuarios = None
 
-st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
-
-if not os.path.exists(DB_PATH):
-    init_db()
-
-# ---------------------------------------------------------------------
-# CSS FORÇADO PARA REMOVER DEFINITIVAMENTE A NAVEGAÇÃO LATERAL
-# ---------------------------------------------------------------------
-st.markdown(
-    """
-    <style>
-        /* Oculta completamente a lista de páginas automáticas da sidebar */
-        [data-testid="stSidebarNav"], 
-        [data-testid="stSidebarNavItems"],
-        div[class*="stSidebarNav"] {
-            display: none !important;
-            height: 0px !important;
-        }
-        
-        /* Ajusta o espaçamento do topo das abas */
-        .block-container {
-            padding-top: 2rem !important;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# ---------------------------------------------------------------------
-# LOGIN
-# ---------------------------------------------------------------------
-if "usuario" not in st.session_state:
-    st.session_state.usuario = None
-
-if st.session_state.usuario is None:
-    st.title("📦 Almoxarifado")
-    st.subheader("Entrar")
-    with st.form("login_form"):
-        username = st.text_input("Usuário")
-        pin = st.text_input("PIN", type="password")
-        entrar = st.form_submit_button("Entrar", use_container_width=True)
-    if entrar:
-        user = verify_pin(username.strip(), pin.strip())
-        if user:
-            st.session_state.usuario = dict(user)
-            st.rerun()
-        else:
-            st.error("Usuário ou PIN inválido.")
-    st.caption("Usuário padrão: admin / PIN: 1234 (troque depois em Usuários).")
-    st.stop()
-
-# ---------------------------------------------------------------------
-# BARRA LATERAL (APENAS IDENTIFICAÇÃO E SAIR)
-# ---------------------------------------------------------------------
 usuario = st.session_state.usuario
 
+# Barra Lateral (Apenas Perfil e Logout)
 with st.sidebar:
-    st.markdown(f"### 📦 **Almoxarifado**")
+    st.markdown("### 📦 **Almoxarifado**")
     st.divider()
-    st.markdown(f"**{usuario['nome']}**")
-    st.caption(f"Perfil: {usuario['role']}")
+    st.markdown(f"**Conectado como:**")
+    st.markdown(f"### `{usuario.get('nome', 'Usuário')}`")
+    st.caption(f"Perfil: {usuario.get('role', 'user')}")
+    st.write("")
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.usuario = None
         st.rerun()
 
 # ---------------------------------------------------------------------
-# NAVEGAÇÃO PRINCIPAL (ABAS NO TOPO DA TELA)
+# PAINEL PRINCIPAL COM NAVEGAÇÃO EM ABAS
 # ---------------------------------------------------------------------
 titulos_abas = [
     "🏠 Dashboard",
@@ -99,7 +102,6 @@ is_admin = usuario.get("role") == "admin"
 if is_admin:
     titulos_abas.append("🔐 Usuários")
 
-# Criação das abas superiores
 abas = st.tabs(titulos_abas)
 
 def executar_view(modulo):
@@ -108,7 +110,6 @@ def executar_view(modulo):
     elif hasattr(modulo, 'main'):
         modulo.main()
 
-# Mapeamento do conteúdo de cada view dentro de sua respectiva aba
 with abas[0]:
     executar_view(dashboard)
 
