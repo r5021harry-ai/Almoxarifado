@@ -29,9 +29,18 @@ def init_db(reset: bool = False):
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = get_connection()
+    
     with open(SCHEMA_PATH, encoding="utf-8") as f:
         conn.executescript(f.read())
     conn.commit()
+
+    # --- TENTA ADICIONAR A COLUNA DE PREÇO UNITÁRIO CASO NÃO EXISTA ---
+    try:
+        conn.execute("ALTER TABLE produtos ADD COLUMN preco_unitario REAL DEFAULT 0.0")
+        conn.commit()
+    except Exception:
+        pass  # Se a coluna já existir, ignora o erro sem afetar os dados
+    # ------------------------------------------------------------------
 
     # Cria usuário administrador padrão se não existir nenhum usuário
     cur = conn.execute("SELECT COUNT(*) AS n FROM usuarios")
