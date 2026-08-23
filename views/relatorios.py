@@ -11,13 +11,24 @@ def gerar_excel_saidas(data_inicio, data_fim, titulo_periodo):
     conn = get_connection()
     c = conn.cursor()
     
-    # Busca todas as movimentações do tipo SAIDA dentro do período informado
-    query = """
+    # 1. Identifica as colunas disponíveis na tabela produtos
+    c.execute("PRAGMA table_info(produtos)")
+    cols_produtos = [col[1] for col in c.fetchall()]
+    
+    col_codigo = "codigo" if "codigo" in cols_produtos else "id"
+    col_nome = "nome" if "nome" in cols_produtos else "descricao"
+    
+    # Procura a coluna de preço/valor unitário
+    col_preco = next((k for k in ['valor_unitario', 'preco', 'valor', 'preco_unitario'] if k in cols_produtos), None)
+    sql_preco = f"p.{col_preco}" if col_preco else "0"
+
+    # 2. Busca movimentações de SAÍDA no período
+    query = f"""
         SELECT 
-            p.codigo AS "Código",
-            p.nome AS "Nome do Produto",
+            p.{col_codigo} AS "Código",
+            p.{col_nome} AS "Nome do Produto",
             m.quantidade AS Qtd,
-            COALESCE(p.preco, p.valor_unitario, 0) AS "Valor Unitário (R$)",
+            COALESCE({sql_preco}, 0) AS "Valor Unitário (R$)",
             m.observacao,
             m.data_hora
         FROM movimentacoes m
@@ -31,34 +42,37 @@ def gerar_excel_saidas(data_inicio, data_fim, titulo_periodo):
         rows = c.fetchall()
         
         if not rows:
-            return None
+            return None, None
             
         dados = [dict(r) for r in rows]
         df = pd.DataFrame(dados)
         
-        # Trata o valor unitário caso tenha sido registrado na observação de entrada
+        # 3. Se o valor unitário for zero no cadastro, extrai o valor das saídas/entradas na observação
         for idx, row in df.iterrows():
-            if row["Valor Unitário (R$)"] == 0 and "Valor Un.: R$" in str(row["observacao"]):
+            if float(row["Valor Unitário (R$)"]) == 0 and "Valor Un.: R$" in str(row["observacao"]):
                 try:
                     val_str = str(row["observacao"]).split("Valor Un.: R$")[1].split("|")[0].strip()
                     df.at[idx, "Valor Unitário (R$)"] = float(val_str.replace(",", "."))
                 except:
                     pass
 
-        # Agrupa por Código e Nome do Produto somando as quantidades
+        # Converte a coluna para numérico para evitar erros de soma
+        df["Valor Unitário (R$)"] = pd.to_numeric(df["Valor Unitário (R$)"], errors="coerce").fillna(0.0)
+        df["Qtd"] = pd.to_numeric(df["Qtd"], errors="coerce").fillna(0.0)
+
+        # 4. Agrupa os dados por Código e Nome do Produto
         df_grouped = df.groupby(["Código", "Nome do Produto"], as_index=False).agg({
             "Qtd": "sum",
-            "Valor Unitário (R$)": "mean"
+            "Valor Unitário (R$)": "max"
         })
         
-        # Calcula o Total = Quantidade * Valor Unitário
+        # 5. Calcula o Total = Quantidade * Valor Unitário
         df_grouped["Total (R$)"] = df_grouped["Qtd"] * df_grouped["Valor Unitário (R$)"]
         
-        # Calcula os totais gerais do período
+        # 6. Adiciona a linha final com o TOTAL GERAL
         total_qtd = df_grouped["Qtd"].sum()
         total_valor = df_grouped["Total (R$)"].sum()
         
-        # Adiciona a linha de TOTAL GERAL no final da tabela
         linha_total = pd.DataFrame([{
             "Código": "TOTAL GERAL",
             "Nome do Produto": "---",
@@ -69,7 +83,7 @@ def gerar_excel_saidas(data_inicio, data_fim, titulo_periodo):
         
         df_final = pd.concat([df_grouped, linha_total], ignore_index=True)
         
-        # Exporta para memória (buffer) em formato XLSX
+        # 7. Gera o arquivo em buffer (.xlsx)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df_final.to_excel(writer, sheet_name=titulo_periodo[:31], index=False)
@@ -83,11 +97,11 @@ def gerar_excel_saidas(data_inicio, data_fim, titulo_periodo):
         conn.close()
 
 
-# Layout das abas de tipos de relatórios
+# Interface de Abas
 tab_diario, tab_semanal, tab_mensal, tab_custom = st.tabs(["Diário", "Semanal", "Mensal", "Personalizado"])
 
 # ---------------------------------------------------------------------
-# RELATÓRIO DIÁRIO
+# DIÁRIO
 # ---------------------------------------------------------------------
 with tab_diario:
     data_sel = st.date_input("Selecione a Data", dt.date.today(), key="diario_data")
@@ -106,7 +120,7 @@ with tab_diario:
             st.info("Nenhuma saída registrada para a data selecionada.")
 
 # ---------------------------------------------------------------------
-# RELATÓRIO SEMANAL
+# SEMANAL
 # ---------------------------------------------------------------------
 with tab_semanal:
     data_fim_sem = dt.date.today()
@@ -127,7 +141,7 @@ with tab_semanal:
             st.info("Nenhuma saída registrada nos últimos 7 dias.")
 
 # ---------------------------------------------------------------------
-# RELATÓRIO MENSAL
+# MENSAL
 # ---------------------------------------------------------------------
 with tab_mensal:
     hoje = dt.date.today()
@@ -148,7 +162,7 @@ with tab_mensal:
             st.info("Nenhuma saída registrada neste mês.")
 
 # ---------------------------------------------------------------------
-# RELATÓRIO PERSONALIZADO
+# PERSONALIZADO
 # ---------------------------------------------------------------------
 with tab_custom:
     col1, col2 = st.columns(2)
