@@ -2,12 +2,49 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
-from database.db import init_db, verify_pin, DB_PATH
+from database.db import init_db, verify_pin, DB_PATH, get_connection
 
 st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
 
 if not os.path.exists(DB_PATH):
     init_db()
+
+# ---------------------------------------------------------------------
+# CONSULTA PÚBLICA VIA QR CODE (SEM NECESSIDADE DE LOGIN)
+# ---------------------------------------------------------------------
+query_params = st.query_params
+
+if "p" in query_params:
+    st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
+    codigo_prod = query_params["p"]
+    
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT codigo, nome, estoque_atual, unidade, preco_unitario FROM produtos WHERE codigo = ?", (codigo_prod,))
+    produto = c.fetchone()
+    conn.close()
+
+    st.title("📦 Consulta de Estoque")
+    st.caption("Almoxarifado - Oficina")
+    st.divider()
+    
+    if produto:
+        st.success("✅ Produto Localizado")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(label="Nome do Produto", value=produto["nome"])
+            st.metric(label="Código", value=produto["codigo"])
+        with col2:
+            st.metric(label="Estoque Disponível", value=f"{produto['estoque_atual']} {produto['unidade']}")
+            
+            # Exibe o valor unitário caso exista
+            if "preco_unitario" in produto.keys() and produto["preco_unitario"]:
+                st.metric(label="Valor Unitário", value=f"R$ {produto['preco_unitario']:.2f}")
+    else:
+        st.error(f"❌ Produto com código '{codigo_prod}' não foi encontrado no sistema.")
+    
+    st.stop()  # Interrompe a execução para não exibir o painel do sistema
 
 # ---------------------------------------------------------------------
 # ESTILIZAÇÃO DO MENU SUPERIOR (ABAS)
