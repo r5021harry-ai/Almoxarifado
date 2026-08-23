@@ -4,13 +4,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import streamlit as st
 from database.db import init_db, verify_pin, DB_PATH
 
-# Importa as views diretamente
+# Importação dos módulos de visualização
 from views import (
     dashboard, nova_saida, entrada, produtos,
     funcionarios, veiculos, requisicoes, relatorios, qrcodes
 )
 
-# Tenta importar usuários se existir
 try:
     from views import usuarios
 except ImportError:
@@ -21,12 +20,23 @@ st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
 if not os.path.exists(DB_PATH):
     init_db()
 
-# Esconde o menu nativo do Streamlit na barra lateral
+# ---------------------------------------------------------------------
+# CSS FORÇADO PARA REMOVER DEFINITIVAMENTE A NAVEGAÇÃO LATERAL
+# ---------------------------------------------------------------------
 st.markdown(
     """
     <style>
-        [data-testid="stSidebarNav"] {
+        /* Oculta completamente a lista de páginas automáticas da sidebar */
+        [data-testid="stSidebarNav"], 
+        [data-testid="stSidebarNavItems"],
+        div[class*="stSidebarNav"] {
             display: none !important;
+            height: 0px !important;
+        }
+        
+        /* Ajusta o espaçamento do topo das abas */
+        .block-container {
+            padding-top: 2rem !important;
         }
     </style>
     """,
@@ -57,19 +67,21 @@ if st.session_state.usuario is None:
     st.stop()
 
 # ---------------------------------------------------------------------
-# BARRA LATERAL (APENAS PERFIL E LOGOUT)
+# BARRA LATERAL (APENAS IDENTIFICAÇÃO E SAIR)
 # ---------------------------------------------------------------------
 usuario = st.session_state.usuario
 
 with st.sidebar:
+    st.markdown(f"### 📦 **Almoxarifado**")
+    st.divider()
     st.markdown(f"**{usuario['nome']}**")
     st.caption(f"Perfil: {usuario['role']}")
-    if st.button("Sair", use_container_width=True):
+    if st.button("🚪 Sair", use_container_width=True):
         st.session_state.usuario = None
         st.rerun()
 
 # ---------------------------------------------------------------------
-# NAVEGAÇÃO SUPERIOR EM ABAS
+# NAVEGAÇÃO PRINCIPAL (ABAS NO TOPO DA TELA)
 # ---------------------------------------------------------------------
 titulos_abas = [
     "🏠 Dashboard",
@@ -87,15 +99,16 @@ is_admin = usuario.get("role") == "admin"
 if is_admin:
     titulos_abas.append("🔐 Usuários")
 
+# Criação das abas superiores
 abas = st.tabs(titulos_abas)
 
-# Roteamento dos arquivos das views nas abas
 def executar_view(modulo):
     if hasattr(modulo, 'render'):
         modulo.render()
     elif hasattr(modulo, 'main'):
         modulo.main()
 
+# Mapeamento do conteúdo de cada view dentro de sua respectiva aba
 with abas[0]:
     executar_view(dashboard)
 
