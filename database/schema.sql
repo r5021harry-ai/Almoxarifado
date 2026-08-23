@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS funcionarios (
 CREATE TABLE IF NOT EXISTS veiculos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     placa TEXT UNIQUE NOT NULL,
+    modelo TEXT,
     status TEXT NOT NULL DEFAULT 'Ativo'
 );
 
