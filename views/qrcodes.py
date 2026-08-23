@@ -1,57 +1,142 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import io
-import zipfile
 import streamlit as st
+import pandas as pd
+import qrcode
 from database.db import get_connection
-from services.qrcode_service import gerar_qrcode_produto, gerar_etiqueta
 
-if st.session_state.get("usuario") is None:
-    st.warning("Faça login primeiro na página inicial.")
-    st.stop()
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 
-st.title("🏷️ Gerenciar QR Codes")
+st.markdown("## 🏷️ Gerenciar QR Codes")
 
 conn = get_connection()
-produtos = conn.execute("SELECT * FROM produtos WHERE status='Ativo' ORDER BY nome").fetchall()
+df_produtos = pd.read_sql_query("SELECT id, codigo, nome FROM produtos WHERE status='Ativo' ORDER BY nome", conn)
 conn.close()
 
-busca = st.text_input("🔎 Buscar produto")
-lista = [p for p in produtos if busca.lower() in p["nome"].lower() or busca.lower() in p["codigo"].lower()] if busca else produtos
+if df_produtos.empty:
+    st.info("Nenhum produto cadastrado para gerar QR Code.")
+    st.stop()
 
-st.caption(f"{len(lista)} produto(s)")
-selecionados = []
+# BARRA DE BUSCA E SELEÇÃO
+busca = st.text_input("🔍 Buscar produto", placeholder="Digite o nome ou código...")
+
+if busca:
+    df_filtrado = df_produtos[
+        df_produtos['nome'].str.contains(busca, case=False, na=False) | 
+        df_produtos['codigo'].str.contains(busca, case=False, na=False)
+    ]
+else:
+    df_filtrado = df_produtos
+
+st.caption(f"{len(df_filtrado)} produto(s) encontrado(s)")
+
+# BOTÕES DE MARCAR/DESMARCAR TODOS
+col_a, col_b, _ = st.columns([1, 1, 3])
+if col_a.button("Selecionar Todos"):
+    st.session_state["sel_todos"] = True
+if col_b.button("Desmarcar Todos"):
+    st.session_state["sel_todos"] = False
+
+# SELEÇÃO DOS PRODUTOS EM GRID DE CHECKBOXES
+produtos_selecionados = []
 cols = st.columns(4)
-for i, p in enumerate(lista):
-    with cols[i % 4]:
-        marcado = st.checkbox(f"{p['nome']} ({p['codigo']})", key=f"qr_{p['id']}")
-        if marcado:
-            selecionados.append(p)
 
-st.divider()
-col1, col2 = st.columns(2)
+for i, row in enumerate(df_filtrado.to_dict('records')):
+    col_idx = i % 4
+    default_val = st.session_state.get("sel_todos", False)
+    
+    marcado = cols[col_idx].checkbox(
+        f"{row['nome']} ({row['codigo']})", 
+        value=default_val, 
+        key=f"qr_{row['id']}"
+    )
+    if marcado:
+        produtos_selecionados.append(row)
 
-if col1.button("🖨️ Gerar etiquetas dos SELECIONADOS", type="primary", disabled=not selecionados):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for p in selecionados:
-            etiqueta_path = gerar_etiqueta(p["codigo"], p["nome"], p["numero_peca"] or "", p["localizacao"] or "")
-            zf.write(etiqueta_path, arcname=os.path.basename(etiqueta_path))
-    buf.seek(0)
-    st.download_button("⬇️ Baixar etiquetas selecionadas (.zip)", buf, file_name="etiquetas_selecionadas.zip",
-                        mime="application/zip")
+st.markdown("---")
 
-if col2.button("🖨️ Gerar etiquetas de TODOS os produtos ativos"):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for p in produtos:
-            etiqueta_path = gerar_etiqueta(p["codigo"], p["nome"], p["numero_peca"] or "", p["localizacao"] or "")
-            zf.write(etiqueta_path, arcname=os.path.basename(etiqueta_path))
-    buf.seek(0)
-    st.download_button("⬇️ Baixar TODAS as etiquetas (.zip)", buf, file_name="etiquetas_todas.zip",
-                        mime="application/zip")
+# FUNÇÃO PARA GERAR O PDF DAS ETIQUETAS
+def gerar_pdf_etiquetas(lista_produtos):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    largura_pagina, altura_pagina = A4
 
-st.info("Cada etiqueta contém o QR Code, nome do produto, código, número da peça (se houver) e localização. "
-        "A quantidade em estoque nunca é impressa na etiqueta — o QR Code só guarda a identificação do produto; "
-        "o estoque é sempre consultado no banco no momento da leitura.")
+    # Configurações de layout da etiqueta (Grid A4: 3 colunas x 7 linhas)
+    colunas = 3
+    largura_etiqueta = 60 * mm
+    altura_etiqueta = 35 * mm
+    margem_x = 10 * mm
+    margem_y = 15 * mm
+    espaco_x = 5 * mm
+    espaco_y = 3 * mm
+
+    col_atual = 0
+    linha_atual = 0
+
+    for prod in lista_produtos:
+        # Posição X e Y na página
+        x = margem_x + col_atual * (largura_etiqueta + espaco_x)
+        y = altura_pagina - margem_y - (linha_atual + 1) * (altura_etiqueta + espaco_y)
+
+        # Desenha a borda suave da etiqueta
+        c.setStrokeColorRGB(0.8, 0.8, 0.8)
+        c.setLineWidth(0.5)
+        c.roundRect(x, y, largura_etiqueta, altura_etiqueta, 3*mm, stroke=1, fill=0)
+
+        # Gerar Imagem do QR Code em memória
+        qr = qrcode.QRCode(box_size=4, border=1)
+        qr.add_data(prod['codigo'])
+        qr.make(fit=True)
+        img_qr = qr.make_image(fill_color="black", back_color="white")
+        
+        img_buffer = io.BytesIO()
+        img_qr.save(img_buffer, format="PNG")
+        img_buffer.seek(0)
+        
+        # Desenhar o QR Code dentro da etiqueta
+        reader = ImageReader(img_buffer)
+        c.drawImage(reader, x + 2*mm, y + 4*mm, width=27*mm, height=27*mm)
+
+        # Desenhar os textos (Nome e Código) ao lado do QR Code
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 8)
+        
+        # Trunca o nome do produto se for muito longo
+        nome_curto = prod['nome'][:20] + "..." if len(prod['nome']) > 20 else prod['nome']
+        c.drawString(x + 30*mm, y + 22*mm, nome_curto)
+
+        c.setFont("Helvetica", 8)
+        c.drawString(x + 30*mm, y + 15*mm, f"Cód: {prod['codigo']}")
+
+        # Atualizar coordenadas da grade
+        col_atual += 1
+        if col_atual >= colunas:
+            col_atual = 0
+            linha_atual += 1
+
+        # Cria nova página se a atual estiver cheia
+        if linha_atual >= 7:
+            c.showPage()
+            col_atual = 0
+            linha_atual = 0
+
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# BOTÃO DE GERAR/BAIXAR PDF
+if produtos_selecionados:
+    pdf_data = gerar_pdf_etiquetas(produtos_selecionados)
+    
+    st.download_button(
+        label=f"🖨️ Imprimir {len(produtos_selecionados)} QR Code(s) em PDF",
+        data=pdf_data,
+        file_name="etiquetas_qrcodes.pdf",
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True
+    )
+else:
+    st.warning("Selecione ao menos um produto para gerar a folha de impressão.")
