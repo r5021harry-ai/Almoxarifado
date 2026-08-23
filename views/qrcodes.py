@@ -21,7 +21,7 @@ if df_produtos.empty:
     st.info("Nenhum produto cadastrado para gerar QR Code.")
     st.stop()
 
-# BARRA DE BUSCA E SELEÇÃO
+# BARRA DE BUSCA
 busca = st.text_input("🔍 Buscar produto", placeholder="Digite o nome ou código...")
 
 if busca:
@@ -34,38 +34,47 @@ else:
 
 st.caption(f"{len(df_filtrado)} produto(s) encontrado(s)")
 
-# BOTÕES DE MARCAR/DESMARCAR TODOS
-col_a, col_b, _ = st.columns([1, 1, 3])
-if col_a.button("Selecionar Todos"):
-    st.session_state["sel_todos"] = True
-if col_b.button("Desmarcar Todos"):
-    st.session_state["sel_todos"] = False
+# LÓGICA DOS BOTÕES DE MARCAR / DESMARCAR TODOS
+col_a, col_b, _ = st.columns([1.5, 1.5, 3])
 
-# SELEÇÃO DOS PRODUTOS EM GRID DE CHECKBOXES
+if col_a.button("✅ Selecionar Todos"):
+    for prod in df_filtrado.to_dict('records'):
+        st.session_state[f"qr_{prod['id']}"] = True
+    st.rerun()
+
+if col_b.button("❌ Desmarcar Todos"):
+    for prod in df_filtrado.to_dict('records'):
+        st.session_state[f"qr_{prod['id']}"] = False
+    st.rerun()
+
+# EXIBIÇÃO DOS CHECKBOXES EM 4 COLUNAS
 produtos_selecionados = []
 cols = st.columns(4)
 
 for i, row in enumerate(df_filtrado.to_dict('records')):
     col_idx = i % 4
-    default_val = st.session_state.get("sel_todos", False)
+    key_name = f"qr_{row['id']}"
     
+    # Inicializa o estado como False caso ainda não exista no session_state
+    if key_name not in st.session_state:
+        st.session_state[key_name] = False
+
     marcado = cols[col_idx].checkbox(
         f"{row['nome']} ({row['codigo']})", 
-        value=default_val, 
-        key=f"qr_{row['id']}"
+        key=key_name
     )
+    
     if marcado:
         produtos_selecionados.append(row)
 
 st.markdown("---")
 
-# FUNÇÃO PARA GERAR O PDF DAS ETIQUETAS
+# GERADOR DE PDF DAS ETIQUETAS
 def gerar_pdf_etiquetas(lista_produtos):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     largura_pagina, altura_pagina = A4
 
-    # Grid A4 (3 colunas x 7 linhas)
     colunas = 3
     largura_etiqueta = 60 * mm
     altura_etiqueta = 35 * mm
@@ -77,7 +86,6 @@ def gerar_pdf_etiquetas(lista_produtos):
     col_atual = 0
     linha_atual = 0
 
-    # Estilo para o nome do produto com quebra automática de linha
     styles = getSampleStyleSheet()
     estilo_produto = ParagraphStyle(
         'EstiloProduto',
@@ -89,11 +97,9 @@ def gerar_pdf_etiquetas(lista_produtos):
     )
 
     for prod in lista_produtos:
-        # Posição base (canto inferior esquerdo da etiqueta)
         x = margem_x + col_atual * (largura_etiqueta + espaco_x)
         y = altura_pagina - margem_y - (linha_atual + 1) * (altura_etiqueta + espaco_y)
 
-        # Borda da etiqueta
         c.setStrokeColorRGB(0.8, 0.8, 0.8)
         c.setLineWidth(0.5)
         c.roundRect(x, y, largura_etiqueta, altura_etiqueta, 3*mm, stroke=1, fill=0)
@@ -103,11 +109,10 @@ def gerar_pdf_etiquetas(lista_produtos):
         c.setFont("Helvetica-Bold", 7)
         c.drawCentredString(x + (largura_etiqueta / 2), y + altura_etiqueta - 4.5*mm, "Almoxarifado - Oficina")
 
-        # Linha divisória discreta
         c.setStrokeColorRGB(0.9, 0.9, 0.9)
         c.line(x + 2*mm, y + altura_etiqueta - 6*mm, x + largura_etiqueta - 2*mm, y + altura_etiqueta - 6*mm)
 
-        # 2. GERAR QR CODE
+        # 2. QR CODE
         qr = qrcode.QRCode(box_size=3, border=1)
         qr.add_data(prod['codigo'])
         qr.make(fit=True)
@@ -120,17 +125,16 @@ def gerar_pdf_etiquetas(lista_produtos):
         reader = ImageReader(img_buffer)
         c.drawImage(reader, x + 2*mm, y + 2*mm, width=24*mm, height=24*mm)
 
-        # 3. NOME DO PRODUTO (Quebra automática de linha)
+        # 3. NOME COMPLETO DO PRODUTO
         p_nome = Paragraph(prod['nome'], estilo_produto)
         p_nome.wrapOn(c, 31*mm, 16*mm)
         p_nome.drawOn(c, x + 27*mm, y + 10*mm)
 
-        # 4. CÓDIGO DO PRODUTO
+        # 4. CÓDIGO
         c.setFillColorRGB(0, 0, 0)
         c.setFont("Helvetica-Bold", 7.5)
         c.drawString(x + 27*mm, y + 4*mm, f"Cód: {prod['codigo']}")
 
-        # Atualiza a grade de etiquetas
         col_atual += 1
         if col_atual >= colunas:
             col_atual = 0
@@ -145,7 +149,7 @@ def gerar_pdf_etiquetas(lista_produtos):
     buffer.seek(0)
     return buffer.getvalue()
 
-# BOTÃO DE GERAR/BAIXAR PDF
+# BOTÃO DE IMPRESSÃO
 if produtos_selecionados:
     pdf_data = gerar_pdf_etiquetas(produtos_selecionados)
     
