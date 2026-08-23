@@ -43,10 +43,10 @@ if "p" in query_params:
     else:
         st.error(f"❌ Produto com o código '{codigo_prod}' não foi localizado no banco de dados.")
     
-    st.stop()  # Encerra o script para não exibir a tela de login/menu
+    st.stop()
 
 # ---------------------------------------------------------------------
-# ESTILIZAÇÃO DO MENU SUPERIOR (ABAS)
+# ESTILIZAÇÃO DO MENU SUPERIOR (ABAS) E CENTRALIZAÇÃO DO LOGIN
 # ---------------------------------------------------------------------
 st.markdown(
     """
@@ -68,27 +68,56 @@ st.markdown(
         div[role="radiogroup"] label:hover {
             border-color: #60a5fa !important;
         }
+
+        /* Centralização Vertical e Alinhamento do Login */
+        .login-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .login-header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 4px;
+        }
+        .login-header p {
+            color: #94a3b8;
+            font-size: 1rem;
+        }
     </style>
     """,
     unsafe_allow_html=True
 )
 
 # ---------------------------------------------------------------------
-# LOGIN
+# LOGIN (CENTRALIZADO)
 # ---------------------------------------------------------------------
 if "usuario" not in st.session_state:
     st.session_state.usuario = None
 
 if st.session_state.usuario is None:
     st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    with col2:
-        st.title("📦 Almoxarifado")
-        st.subheader("Acesso ao Sistema")
+    
+    # Espaçadores verticais para alinhar ao centro da página
+    st.write("")
+    st.write("")
+    
+    col_left, col_center, col_right = st.columns([1, 1.2, 1])
+    
+    with col_center:
+        st.markdown(
+            """
+            <div class="login-header">
+                <h1>📦 Almoxarifado</h1>
+                <p>Acesso ao Sistema</p>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+        
         with st.form("login_form"):
             username = st.text_input("Usuário")
             pin = st.text_input("PIN", type="password")
             entrar = st.form_submit_button("Entrar", use_container_width=True)
+            
         if entrar:
             user = verify_pin(username.strip(), pin.strip())
             if user:
