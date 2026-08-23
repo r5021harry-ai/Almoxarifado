@@ -21,6 +21,8 @@ if "req_funcionario" not in st.session_state:
     st.session_state.req_funcionario = None
 if "req_veiculo" not in st.session_state:
     st.session_state.req_veiculo = None
+if "produto_lido" not in st.session_state:
+    st.session_state.produto_lido = None
 
 st.title("📱 Nova Saída")
 
@@ -40,13 +42,13 @@ col1, col2 = st.columns(2)
 with col1:
     nomes_func = [f"{f['nome']} — {f['funcao']}" for f in funcionarios]
     idx_func = st.selectbox("👤 Solicitante", range(len(funcionarios)),
-                             format_func=lambda i: nomes_func[i],
-                             index=None, placeholder="Selecionar...")
+                            format_func=lambda i: nomes_func[i],
+                            index=None, placeholder="Selecionar...")
 with col2:
     placas = [v["placa"] for v in veiculos]
     idx_veic = st.selectbox("🚗 Veículo", range(len(veiculos)),
-                             format_func=lambda i: placas[i],
-                             index=None, placeholder="Selecionar...")
+                            format_func=lambda i: placas[i],
+                            index=None, placeholder="Selecionar...")
 
 if idx_func is not None:
     st.session_state.req_funcionario = dict(funcionarios[idx_func])
@@ -71,8 +73,6 @@ st.subheader("📷 Adicionar material")
 
 tab_camera, tab_manual = st.tabs(["📷 Ler QR Code", "⌨️ Digitar código"])
 
-produto_lido = None
-
 with tab_camera:
     foto = st.camera_input("Aponte a câmera para o QR Code do produto", key="camera_qr")
     if foto is not None:
@@ -85,23 +85,32 @@ with tab_camera:
             texto, _, _ = detector.detectAndDecode(img)
             if texto:
                 codigo = extrair_codigo(texto)
-                produto_lido = buscar_produto_por_codigo(codigo)
-                if produto_lido is None:
+                prod = buscar_produto_por_codigo(codigo)
+                if prod is None:
                     st.error(f"QR Code lido ({codigo}) mas nenhum produto ativo encontrado com esse código.")
+                else:
+                    st.session_state.produto_lido = dict(prod)
             else:
                 st.warning("Não foi possível ler um QR Code nessa foto. Tente novamente, mais perto e com boa luz.")
         except Exception as e:
             st.error(f"Erro ao processar a imagem: {e}")
 
 with tab_manual:
-    codigo_manual = st.text_input("Código do produto")
-    if st.button("Buscar", key="buscar_manual") and codigo_manual:
-        produto_lido = buscar_produto_por_codigo(codigo_manual.strip())
-        if produto_lido is None:
+    with st.form("form_busca_manual"):
+        codigo_manual = st.text_input("Código do produto")
+        btn_buscar = st.form_submit_button("Buscar")
+        
+    if btn_buscar and codigo_manual:
+        prod = buscar_produto_por_codigo(codigo_manual.strip())
+        if prod is None:
+            st.session_state.produto_lido = None
             st.error("Produto não encontrado ou inativo.")
+        else:
+            st.session_state.produto_lido = dict(prod)
 
-if produto_lido is not None:
-    p = dict(produto_lido)
+# Exibe o produto armazenado na sessão
+if st.session_state.produto_lido is not None:
+    p = st.session_state.produto_lido
     st.markdown("---")
     if p.get("foto_path") and os.path.exists(p["foto_path"]):
         st.image(p["foto_path"], width=180)
@@ -112,11 +121,11 @@ if produto_lido is not None:
     if ja_no_carrinho:
         st.warning(f"Este produto já foi adicionado. Quantidade atual: {ja_no_carrinho['quantidade']:g}.")
 
-    qtd = st.number_input("Quantidade", min_value=0.0,
+    qtd = st.number_input("Quantidade", min_value=0.01,
                            value=1.0 if not ja_no_carrinho else float(ja_no_carrinho["quantidade"]),
                            step=1.0, key=f"qtd_{p['id']}")
 
-    if st.button("➕ ADICIONAR À REQUISIÇÃO", type="primary", use_container_width=True):
+    if st.button("➕ ADICIONAR À REQUISIÇÃO", type="primary", use_container_width=True, key="btn_add_req"):
         if qtd <= 0:
             st.error("Informe uma quantidade maior que zero.")
         else:
@@ -127,7 +136,8 @@ if produto_lido is not None:
                     "produto_id": p["id"], "codigo": p["codigo"], "nome": p["nome"],
                     "unidade": p["unidade"], "quantidade": qtd,
                 })
-            st.success(f"{p['nome']} adicionado. Aponte para o próximo QR Code.")
+            st.success(f"{p['nome']} adicionado com sucesso!")
+            st.session_state.produto_lido = None  # Limpa o produto selecionado para a próxima busca
             st.rerun()
 
 # ---------------------------------------------------------------------
@@ -157,6 +167,7 @@ else:
         st.session_state.carrinho = []
         st.session_state.req_funcionario = None
         st.session_state.req_veiculo = None
+        st.session_state.produto_lido = None
         st.rerun()
 
     if colB.button("✅ CONFIRMAR SAÍDA", type="primary", use_container_width=True):
@@ -179,6 +190,8 @@ else:
                 st.session_state.carrinho = []
                 st.session_state.req_funcionario = None
                 st.session_state.req_veiculo = None
+                st.session_state.produto_lido = None
+                st.rerun()
             else:
                 st.error("Erro ao confirmar a saída. Nenhuma baixa foi realizada.")
                 st.write(resultado["problemas"])
