@@ -3,14 +3,9 @@ from database.db import get_connection
 
 st.markdown("## 🚗 Veículos")
 
-# Formulário de Cadastro
+# Formulário de Cadastro (Apenas Placa)
 with st.form("form_veiculo", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        placa = st.text_input("Placa / Identificação")
-    with col2:
-        modelo = st.text_input("Modelo / Descrição")
-        
+    placa = st.text_input("Placa / Identificação")
     btn_salvar = st.form_submit_button("➕ Adicionar Veículo", use_container_width=True)
 
 if btn_salvar:
@@ -19,7 +14,7 @@ if btn_salvar:
         conn = get_connection()
         c = conn.cursor()
         try:
-            c.execute("INSERT INTO veiculos (placa, modelo, status) VALUES (?, ?, 'Ativo')", (placa_limpa, modelo.strip()))
+            c.execute("INSERT INTO veiculos (placa, status) VALUES (?, 'Ativo')", (placa_limpa,))
             conn.commit()
             st.success(f"Veículo '{placa_limpa}' cadastrado com sucesso!")
             st.rerun()
@@ -45,9 +40,8 @@ conn.close()
 
 if veiculos:
     for v in veiculos:
-        col_p, col_m, col_s, col_b = st.columns([3, 3, 2, 2])
+        col_p, col_s, col_b = st.columns([4, 3, 3])
         col_p.write(v["placa"])
-        col_m.write(v.get("modelo") or "-")
         col_s.write(v["status"])
         
         novo_status = "Inativo" if v["status"] == "Ativo" else "Ativo"
@@ -59,4 +53,4 @@ if veiculos:
             conn.close()
             st.rerun()
 else:
-    st.info("Nenhum veículo cadastrado.")
+    st.info("Nenum veículo cadastrado.")
