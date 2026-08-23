@@ -9,18 +9,31 @@ st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
 if not os.path.exists(DB_PATH):
     init_db()
 
-# CSS para esconder a sidebar nativa e criar o menu superior
+# Customização Visual das Abas no Topo
 st.markdown(
     """
     <style>
         [data-testid="stSidebarNav"] { display: none !important; }
-        div[role="radiogroup"] { flex-direction: row !important; justify-content: flex-start; }
+        
+        /* Modifica o radio button para parecer abas / botões */
+        div[role="radiogroup"] {
+            flex-direction: row !important;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
         div[role="radiogroup"] label {
-            background-color: #1e293b;
-            padding: 8px 16px;
-            border-radius: 6px;
-            margin-right: 8px;
-            border: 1px solid #334155;
+            background-color: #1e293b !important;
+            padding: 8px 16px !important;
+            border-radius: 8px !important;
+            border: 1px solid #334155 !important;
+            cursor: pointer;
+        }
+        div[role="radiogroup"] label:hover {
+            border-color: #60a5fa !important;
+        }
+        /* Esconde o círculo do radio button */
+        div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
+            font-weight: 500;
         }
     </style>
     """,
@@ -53,38 +66,36 @@ if st.session_state.usuario is None:
     st.stop()
 
 # ---------------------------------------------------------------------
-# LOGADO - BARRA LATERAL (LOGOUT) E MENU SUPERIOR DE OPÇÕES
+# BARRA LATERAL & MÓDULOS
 # ---------------------------------------------------------------------
 usuario = st.session_state.usuario
 
 with st.sidebar:
     st.markdown("### 📦 **Almoxarifado**")
     st.divider()
-    st.markdown(f"**Conectado como:**")
-    st.markdown(f"### `{usuario.get('nome', 'Usuário')}`")
-    st.caption(f"Perfil: {usuario.get('role', 'user')}")
+    st.markdown("**Conectado como:**")
+    st.markdown(f"### `{usuario.get('nome', 'Administrador')}`")
+    st.caption(f"Perfil: {usuario.get('role', 'admin')}")
     st.write("")
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.usuario = None
         st.rerun()
 
-# Lista de opções do menu superior
-opcoes = [
+opcoes_menu = [
     "🏠 Dashboard", "📱 Nova Saída", "📥 Nova Entrada", 
     "📦 Produtos", "👷 Funcionários", "🚗 Veículos", 
     "📋 Requisições", "📊 Relatórios", "🏷️ QR Codes"
 ]
 
 if usuario.get("role") == "admin":
-    opcoes.append("🔐 Usuários")
+    opcoes_menu.append("🔐 Usuários")
 
-# Menu de Seleção em Botões Superiores
-opcao_selecionada = st.radio("Navegação", opcoes, label_visibility="collapsed")
-
+# Renderização do Menu Superior
+opcao_selecionada = st.radio("Navegação", opcoes_menu, label_visibility="collapsed")
 st.divider()
 
 # ---------------------------------------------------------------------
-# CARREGAMENTO DA VIEW SELECIONADA
+# EXECUÇÃO DA VIEW SELECIONADA
 # ---------------------------------------------------------------------
 from views import (
     dashboard, nova_saida, entrada, produtos,
@@ -102,23 +113,18 @@ def renderizar(modulo):
     elif hasattr(modulo, 'main'):
         modulo.main()
 
-if opcao_selecionada == "🏠 Dashboard":
-    renderizar(dashboard)
-elif opcao_selecionada == "📱 Nova Saída":
-    renderizar(nova_saida)
-elif opcao_selecionada == "📥 Nova Entrada":
-    renderizar(entrada)
-elif opcao_selecionada == "📦 Produtos":
-    renderizar(produtos)
-elif opcao_selecionada == "👷 Funcionários":
-    renderizar(funcionarios)
-elif opcao_selecionada == "🚗 Veículos":
-    renderizar(veiculos)
-elif opcao_selecionada == "📋 Requisições":
-    renderizar(requisicoes)
-elif opcao_selecionada == "📊 Relatórios":
-    renderizar(relatorios)
-elif opcao_selecionada == "🏷️ QR Codes":
-    renderizar(qrcodes)
-elif opcao_selecionada == "🔐 Usuários" and usuarios:
-    renderizar(usuarios)
+mapa_views = {
+    "🏠 Dashboard": dashboard,
+    "📱 Nova Saída": nova_saida,
+    "📥 Nova Entrada": entrada,
+    "📦 Produtos": produtos,
+    "👷 Funcionários": funcionarios,
+    "🚗 Veículos": veiculos,
+    "📋 Requisições": requisicoes,
+    "📊 Relatórios": relatorios,
+    "🏷️ QR Codes": qrcodes,
+    "🔐 Usuários": usuarios
+}
+
+if opcao_selecionada in mapa_views and mapa_views[opcao_selecionada]:
+    renderizar(mapa_views[opcao_selecionada])
