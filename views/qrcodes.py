@@ -8,6 +8,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.markdown("## 🏷️ Gerenciar QR Codes")
 
@@ -63,7 +65,7 @@ def gerar_pdf_etiquetas(lista_produtos):
     c = canvas.Canvas(buffer, pagesize=A4)
     largura_pagina, altura_pagina = A4
 
-    # Configurações de layout da etiqueta (Grid A4: 3 colunas x 7 linhas)
+    # Grid A4 (3 colunas x 7 linhas)
     colunas = 3
     largura_etiqueta = 60 * mm
     altura_etiqueta = 35 * mm
@@ -75,18 +77,38 @@ def gerar_pdf_etiquetas(lista_produtos):
     col_atual = 0
     linha_atual = 0
 
+    # Estilo para o nome do produto com quebra automática de linha
+    styles = getSampleStyleSheet()
+    estilo_produto = ParagraphStyle(
+        'EstiloProduto',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=6.5,
+        leading=8,
+        textColor='black'
+    )
+
     for prod in lista_produtos:
-        # Posição X e Y na página
+        # Posição base (canto inferior esquerdo da etiqueta)
         x = margem_x + col_atual * (largura_etiqueta + espaco_x)
         y = altura_pagina - margem_y - (linha_atual + 1) * (altura_etiqueta + espaco_y)
 
-        # Desenha a borda suave da etiqueta
+        # Borda da etiqueta
         c.setStrokeColorRGB(0.8, 0.8, 0.8)
         c.setLineWidth(0.5)
         c.roundRect(x, y, largura_etiqueta, altura_etiqueta, 3*mm, stroke=1, fill=0)
 
-        # Gerar Imagem do QR Code em memória
-        qr = qrcode.QRCode(box_size=4, border=1)
+        # 1. TÍTULO SUPERIOR
+        c.setFillColorRGB(0.1, 0.1, 0.1)
+        c.setFont("Helvetica-Bold", 7)
+        c.drawCentredString(x + (largura_etiqueta / 2), y + altura_etiqueta - 4.5*mm, "Almoxarifado - Oficina")
+
+        # Linha divisória discreta
+        c.setStrokeColorRGB(0.9, 0.9, 0.9)
+        c.line(x + 2*mm, y + altura_etiqueta - 6*mm, x + largura_etiqueta - 2*mm, y + altura_etiqueta - 6*mm)
+
+        # 2. GERAR QR CODE
+        qr = qrcode.QRCode(box_size=3, border=1)
         qr.add_data(prod['codigo'])
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white")
@@ -95,28 +117,25 @@ def gerar_pdf_etiquetas(lista_produtos):
         img_qr.save(img_buffer, format="PNG")
         img_buffer.seek(0)
         
-        # Desenhar o QR Code dentro da etiqueta
         reader = ImageReader(img_buffer)
-        c.drawImage(reader, x + 2*mm, y + 4*mm, width=27*mm, height=27*mm)
+        c.drawImage(reader, x + 2*mm, y + 2*mm, width=24*mm, height=24*mm)
 
-        # Desenhar os textos (Nome e Código) ao lado do QR Code
+        # 3. NOME DO PRODUTO (Quebra automática de linha)
+        p_nome = Paragraph(prod['nome'], estilo_produto)
+        p_nome.wrapOn(c, 31*mm, 16*mm)
+        p_nome.drawOn(c, x + 27*mm, y + 10*mm)
+
+        # 4. CÓDIGO DO PRODUTO
         c.setFillColorRGB(0, 0, 0)
-        c.setFont("Helvetica-Bold", 8)
-        
-        # Trunca o nome do produto se for muito longo
-        nome_curto = prod['nome'][:20] + "..." if len(prod['nome']) > 20 else prod['nome']
-        c.drawString(x + 30*mm, y + 22*mm, nome_curto)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(x + 27*mm, y + 4*mm, f"Cód: {prod['codigo']}")
 
-        c.setFont("Helvetica", 8)
-        c.drawString(x + 30*mm, y + 15*mm, f"Cód: {prod['codigo']}")
-
-        # Atualizar coordenadas da grade
+        # Atualiza a grade de etiquetas
         col_atual += 1
         if col_atual >= colunas:
             col_atual = 0
             linha_atual += 1
 
-        # Cria nova página se a atual estiver cheia
         if linha_atual >= 7:
             c.showPage()
             col_atual = 0
