@@ -53,4 +53,4 @@ if veiculos:
             conn.close()
             st.rerun()
 else:
-    st.info("Nenhum veículo cadastrado.")
+    st.info("Nenum veículo cadastrado.")
