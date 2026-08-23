@@ -10,17 +10,17 @@ if not os.path.exists(DB_PATH):
     init_db()
 
 # ---------------------------------------------------------------------
-# CONSULTA PÚBLICA VIA QR CODE (SEM NECESSIDADE DE LOGIN)
+# CONSULTA PÚBLICA VIA QR CODE (LEITURA POR CÂMERA SEM LOGIN)
 # ---------------------------------------------------------------------
 query_params = st.query_params
 
 if "p" in query_params:
     st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
-    codigo_prod = query_params["p"]
+    codigo_prod = str(query_params["p"]).strip()
     
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT codigo, nome, estoque_atual, unidade, preco_unitario FROM produtos WHERE codigo = ?", (codigo_prod,))
+    c.execute("SELECT codigo, nome, estoque_atual, unidade, preco_unitario FROM produtos WHERE CAST(codigo AS TEXT) = ?", (codigo_prod,))
     produto = c.fetchone()
     conn.close()
 
@@ -29,22 +29,21 @@ if "p" in query_params:
     st.divider()
     
     if produto:
-        st.success("✅ Produto Localizado")
+        st.success("✅ Produto Encontrado")
+        
+        st.subheader(f"**{produto['nome']}**")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(label="Nome do Produto", value=produto["nome"])
-            st.metric(label="Código", value=produto["codigo"])
-        with col2:
+            st.metric(label="Código do Produto", value=produto["codigo"])
             st.metric(label="Estoque Disponível", value=f"{produto['estoque_atual']} {produto['unidade']}")
-            
-            # Exibe o valor unitário caso exista
-            if "preco_unitario" in produto.keys() and produto["preco_unitario"]:
-                st.metric(label="Valor Unitário", value=f"R$ {produto['preco_unitario']:.2f}")
+        with col2:
+            val_un = produto['preco_unitario'] if produto['preco_unitario'] else 0.0
+            st.metric(label="Valor Unitário", value=f"R$ {val_un:.2f}")
     else:
-        st.error(f"❌ Produto com código '{codigo_prod}' não foi encontrado no sistema.")
+        st.error(f"❌ Produto com o código '{codigo_prod}' não foi localizado no banco de dados.")
     
-    st.stop()  # Interrompe a execução para não exibir o painel do sistema
+    st.stop()  # Encerra o script para não exibir a tela de login/menu
 
 # ---------------------------------------------------------------------
 # ESTILIZAÇÃO DO MENU SUPERIOR (ABAS)
