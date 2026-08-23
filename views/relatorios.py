@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import io
 from database.db import get_connection
 
 st.markdown("## 📊 Relatórios e Exportação")
@@ -8,7 +7,6 @@ st.caption("Gere relatórios agrupados de saídas com cálculo automático de va
 
 tab_diario, tab_semanal, tab_mensal, tab_custom = st.tabs(["Diário", "Semanal", "Mensal", "Personalizado"])
 
-# Função auxiliar para buscar relatórios no SQLite
 def buscar_relatorio(data_inicio, data_fim=None):
     conn = get_connection()
     c = conn.cursor()
@@ -45,19 +43,19 @@ def buscar_relatorio(data_inicio, data_fim=None):
     conn.close()
     return pd.DataFrame(dados)
 
-# Função para gerar o botão de download seguro em CSV/Excel
 def exibir_tabela_e_download(df, nome_arquivo):
     if df.empty:
         st.info("Nenhuma saída registrada para o período selecionado.")
     else:
         st.dataframe(df, use_container_width=True)
         
-        # Converte para CSV (Sem necessidade de bibliotecas externas como xlsxwriter)
-        csv_bytes = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+        # 'sep=;' separa em colunas no Excel em português
+        # 'utf-8-sig' garante que acentos e caracteres especiais não fiquem corrompidos
+        csv_data = df.to_csv(index=False, sep=';', encoding='utf-8-sig')
         
         st.download_button(
-            label="📥 Exportar Relatório (CSV / Excel)",
-            data=csv_bytes,
+            label="📥 Baixar Planilha para Excel (.csv)",
+            data=csv_data,
             file_name=f"{nome_arquivo}.csv",
             mime="text/csv",
             type="primary"
