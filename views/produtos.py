@@ -59,97 +59,72 @@ def extrair_coluna(row, opcoes_nomes, padrao=""):
     return padrao
 
 # ---------------------------------------------------------------------
-# PROCESSAMENTO BASEADO NO NOVO LAYOUT DA PLANILHA
+# SINCRONIZAÇÃO SILENCIOSA E NATIVA DA PLANILHA COM O SQLite
 # ---------------------------------------------------------------------
-def recriar_estoque_do_zero(df):
+def carregar_dados_nativamente():
+    caminho_anexado = localizar_planilha()
+    if not caminho_anexado:
+        return
+
     try:
         conn = get_connection()
         c = conn.cursor()
-        c.execute("DELETE FROM produtos")
         
+        # Verifica se o banco já tem dados
+        c.execute("SELECT COUNT(*) FROM produtos")
+        total_banco = c.fetchone()[0]
+
+        # Lê o arquivo da pasta dados
+        df = pd.read_excel(caminho_anexado)
         df.columns = [str(col).strip() for col in df.columns]
-        inseridos = 0
 
-        for _, row in df.iterrows():
-            # A: Código
-            codigo_raw = extrair_coluna(row, ['Código', 'Codigo', 'Cod'], None)
-            if not codigo_raw or str(codigo_raw).strip().lower() in ['nan', 'none', '']:
-                continue
-            codigo = str(codigo_raw).strip()
+        # Se o banco estiver vazio ou o número de itens for diferente, atualiza o banco
+        if total_banco == 0 or total_banco != len(df):
+            c.execute("DELETE FROM produtos")
+            
+            for _, row in df.iterrows():
+                codigo_raw = extrair_coluna(row, ['Código', 'Codigo', 'Cod'], None)
+                if not codigo_raw or str(codigo_raw).strip().lower() in ['nan', 'none', '']:
+                    continue
+                codigo = str(codigo_raw).strip()
 
-            # B: Descrição
-            nome_raw = extrair_coluna(row, ['Descrição', 'Descricao', 'Nome'], "PRODUTO SEM NOME")
-            nome = str(nome_raw).strip()
+                nome_raw = extrair_coluna(row, ['Descrição', 'Descricao', 'Nome'], "PRODUTO SEM NOME")
+                nome = str(nome_raw).strip()
 
-            # D: Un. (ou C: Emb.)
-            unidade_raw = extrair_coluna(row, ['Un.', 'Un', 'UN', 'Emb.', 'Emb'], "UN")
-            unidade = str(unidade_raw).strip()
+                unidade_raw = extrair_coluna(row, ['Un.', 'Un', 'UN', 'Emb.', 'Emb'], "UN")
+                unidade = str(unidade_raw).strip()
 
-            # E: Estoque
-            estoque_raw = extrair_coluna(row, ['Estoque', 'Qtd', 'Quantidade'], 0.0)
-            try:
-                estoque = float(str(estoque_raw).replace(".", "").replace(",", ".")) if isinstance(estoque_raw, str) else float(estoque_raw)
-            except (ValueError, TypeError):
-                estoque = 0.0
-
-            # F: Últ. Ent. (Preço Unitário)
-            preco_raw = extrair_coluna(row, ['Últ. Ent.', 'Ult. Ent.', 'Últ.Ent.', 'Ult.Ent.', 'Preço', 'Preco'], 0.0)
-            if pd.isna(preco_raw):
-                preco = 0.0
-            elif isinstance(preco_raw, (int, float)):
-                preco = float(preco_raw)
-            else:
-                p_str = str(preco_raw).replace("R$", "").replace("\xa0", "").strip()
-                p_str = p_str.replace(".", "").replace(",", ".")
+                estoque_raw = extrair_coluna(row, ['Estoque', 'Qtd', 'Quantidade'], 0.0)
                 try:
-                    preco = float(p_str)
-                except ValueError:
+                    estoque = float(str(estoque_raw).replace(".", "").replace(",", ".")) if isinstance(estoque_raw, str) else float(estoque_raw)
+                except (ValueError, TypeError):
+                    estoque = 0.0
+
+                preco_raw = extrair_coluna(row, ['Últ. Ent.', 'Ult. Ent.', 'Últ.Ent.', 'Ult.Ent.', 'Preço', 'Preco'], 0.0)
+                if pd.isna(preco_raw):
                     preco = 0.0
+                elif isinstance(preco_raw, (int, float)):
+                    preco = float(preco_raw)
+                else:
+                    p_str = str(preco_raw).replace("R$", "").replace("\xa0", "").strip()
+                    p_str = p_str.replace(".", "").replace(",", ".")
+                    try:
+                        preco = float(p_str)
+                    except ValueError:
+                        preco = 0.0
 
-            c.execute("""
-                INSERT INTO produtos (codigo, nome, categoria, estoque, unidade, preco)
-                VALUES (?, ?, 'TRANSPORTE', ?, ?, ?)
-            """, (codigo, nome, estoque, unidade, preco))
-            inseridos += 1
+                c.execute("""
+                    INSERT INTO produtos (codigo, nome, categoria, estoque, unidade, preco)
+                    VALUES (?, ?, 'TRANSPORTE', ?, ?, ?)
+                """, (codigo, nome, estoque, unidade, preco))
 
-        conn.commit()
+            conn.commit()
         conn.close()
-        return inseridos
     except Exception as e:
-        st.error(f"Erro ao reprocessar produtos: {e}")
-        return 0
+        st.error(f"Erro no carregamento automático do estoque: {e}")
 
-# ---------------------------------------------------------------------
-# PAINEL E CONTROLES
-# ---------------------------------------------------------------------
-caminho_anexado = localizar_planilha()
-
-if caminho_anexado:
-    st.success(f"📌 Planilha conectada: `{os.path.basename(caminho_anexado)}`")
-else:
-    st.warning("⚠️ Planilha não localizada automaticamente na pasta `dados`.")
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    if caminho_anexado and st.button("🔄 Importar / Sincronizar Planilha", type="primary", use_container_width=True):
-        df_local = pd.read_excel(caminho_anexado)
-        qtd = recriar_estoque_do_zero(df_local)
-        if qtd > 0:
-            st.success(f"✅ {qtd} produtos atualizados com sucesso!")
-            st.rerun()
-
-with col2:
-    if st.button("🗑️ Zerar Banco de Dados", use_container_width=True):
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("DELETE FROM produtos")
-        conn.commit()
-        conn.close()
-        st.warning("Banco zerado!")
-        st.rerun()
-
-st.markdown("---")
+# Executa a carga nativa automaticamente antes de exibir a tela
+carregar_dados_nativamente()
 
 # ---------------------------------------------------------------------
 # LISTAGEM EM FORMATO DE TABELA
