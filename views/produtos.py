@@ -7,45 +7,48 @@ from database.db import get_connection
 st.markdown("## 📦 Gestão de Produtos")
 
 # ---------------------------------------------------------------------
-# GARANTIA DA TABELA DE PRODUTOS
+# REPARO AUTOMÁTICO DA ESTRUTURA DO BANCO DE DADOS
 # ---------------------------------------------------------------------
-def garantir_tabela_produtos():
+def ajustar_estrutura_tabela():
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS produtos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo TEXT UNIQUE,
-            nome TEXT NOT NULL,
-            categoria TEXT DEFAULT 'TRANSPORTE',
-            estoque REAL DEFAULT 0,
-            unidade TEXT DEFAULT 'UN',
-            preco REAL DEFAULT 0.0
-        )
-    """)
-    conn.commit()
+    
+    # Verifica colunas existentes
+    c.execute("PRAGMA table_info(produtos)")
+    colunas = [info[1] for info in c.fetchall()]
+    
+    # Se a tabela não existe ou falta a coluna 'estoque', recria a tabela limpa
+    if not colunas or 'estoque' not in colunas:
+        c.execute("DROP TABLE IF EXISTS produtos")
+        c.execute("""
+            CREATE TABLE produtos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo TEXT UNIQUE,
+                nome TEXT NOT NULL,
+                categoria TEXT DEFAULT 'TRANSPORTE',
+                estoque REAL DEFAULT 0,
+                unidade TEXT DEFAULT 'UN',
+                preco REAL DEFAULT 0.0
+            )
+        """)
+        conn.commit()
     conn.close()
 
-garantir_tabela_produtos()
+ajustAR_estrutura_tabela()
 
 # ---------------------------------------------------------------------
-# BUSCA DINÂMICA PELA PLANILHA NO PROJETO
+# LOCALIZADOR AUTOMÁTICO DA PLANILHA
 # ---------------------------------------------------------------------
 def localizar_planilha():
-    # Busca 'planilha_estoque.xlsx' em qualquer pasta do projeto
     raiz_projeto = Path(__file__).resolve().parents[1]
     for arquivo in raiz_projeto.rglob("planilha_estoque.xlsx"):
         return str(arquivo)
     
-    # Busca alternativa pelo diretório de trabalho atual
     for arquivo in Path.cwd().rglob("planilha_estoque.xlsx"):
         return str(arquivo)
         
     return None
 
-# ---------------------------------------------------------------------
-# EXTRATOR ROBUSTO DE COLUNAS
-# ---------------------------------------------------------------------
 def extrair_coluna(row, opcoes_nomes, padrao=""):
     for col in row.index:
         col_limpa = str(col).strip().lower()
@@ -57,16 +60,18 @@ def extrair_coluna(row, opcoes_nomes, padrao=""):
     return padrao
 
 # ---------------------------------------------------------------------
-# PROCESSADOR DO DATAFRAME
+# CARREGAMENTO E RECRIAÇÃO DO ESTOQUE
 # ---------------------------------------------------------------------
-def processar_dataframe(df):
+def recriar_estoque_do_zero(df):
     try:
         conn = get_connection()
         c = conn.cursor()
-        inseridos = 0
-
-        # Normaliza nomes de colunas no DF para facilitar busca
+        
+        # Elimina os registros existentes completamente
+        c.execute("DELETE FROM produtos")
+        
         df.columns = [str(col).strip() for col in df.columns]
+        inseridos = 0
 
         for _, row in df.iterrows():
             codigo_raw = extrair_coluna(row, ['Código', 'Codigo', 'Cod', 'ID'], None)
@@ -102,11 +107,6 @@ def processar_dataframe(df):
             c.execute("""
                 INSERT INTO produtos (codigo, nome, categoria, estoque, unidade, preco)
                 VALUES (?, ?, 'TRANSPORTE', ?, ?, ?)
-                ON CONFLICT(codigo) DO UPDATE SET
-                    nome=excluded.nome,
-                    estoque=excluded.estoque,
-                    unidade=excluded.unidade,
-                    preco=excluded.preco
             """, (codigo, nome, estoque, unidade, preco))
             inseridos += 1
 
@@ -114,52 +114,43 @@ def processar_dataframe(df):
         conn.close()
         return inseridos
     except Exception as e:
-        st.error(f"Erro ao processar dados da planilha: {e}")
+        st.error(f"Erro ao reprocessar produtos: {e}")
         return 0
 
 # ---------------------------------------------------------------------
-# PAINEL DE CONTROLE DE ARQUIVO E BANCO
+# PAINEL E IMPORTAÇÃO NATIVA
 # ---------------------------------------------------------------------
-caminho_encontrado = localizar_planilha()
+caminho_anexado = localizar_planilha()
 
-if caminho_encontrado:
-    st.success(f"📌 Planilha localizada no servidor: `{caminho_encontrado}`")
+if caminho_anexado:
+    st.success(f"📌 Planilha conectada da pasta 'dados': `{caminho_anexado}`")
 else:
-    st.warning("⚠️ O arquivo `planilha_estoque.xlsx` não foi localizado automaticamente nas pastas do projeto.")
+    st.warning("⚠️ O arquivo `planilha_estoque.xlsx` não foi encontrado na pasta `dados`.")
 
-col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 1.5])
+col1, col2 = st.columns([2, 1])
 
-with col_btn1:
-    if caminho_encontrado and st.button("🔄 Importar da Pasta 'dados'", type="primary", use_container_width=True):
-        df_arq = pd.read_excel(caminho_encontrado)
-        qtd = processar_dataframe(df_arq)
+with col1:
+    if caminho_anexado and st.button("🔄 Substituir Todo o Estoque Pela Planilha", type="primary", use_container_width=True):
+        df_local = pd.read_excel(caminho_anexado)
+        qtd = recriar_estoque_do_zero(df_local)
         if qtd > 0:
-            st.success(f"✅ {qtd} produtos importados/atualizados com sucesso!")
+            st.success(f"✅ Sucesso! {qtd} produtos carregados da planilha local!")
             st.rerun()
 
-with col_btn2:
-    arq_up = st.file_uploader("Upload manual da planilha", type=["xlsx"], label_visibility="collapsed")
-    if arq_up:
-        df_up = pd.read_excel(arq_up)
-        qtd = processar_dataframe(df_up)
-        if qtd > 0:
-            st.success(f"✅ {qtd} produtos importados via upload!")
-            st.rerun()
-
-with col_btn3:
-    if st.button("🗑️ Zerar Banco de Dados", type="secondary", use_container_width=True):
+with col2:
+    if st.button("🗑️ Zerar Todo o Banco", use_container_width=True):
         conn = get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM produtos")
         conn.commit()
         conn.close()
-        st.warning("Banco de dados zerado!")
+        st.warning("Estoque completamente limpo!")
         st.rerun()
 
 st.markdown("---")
 
 # ---------------------------------------------------------------------
-# EXIBIÇÃO E BUSCA DE PRODUTOS
+# LISTAGEM DE PRODUTOS
 # ---------------------------------------------------------------------
 conn = get_connection()
 c = conn.cursor()
