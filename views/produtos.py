@@ -28,32 +28,10 @@ def garantir_tabela_produtos():
 garantir_tabela_produtos()
 
 # ---------------------------------------------------------------------
-# LOCALIZADOR ROBUSTO DA PLANILHA DE ESTOQUE
-# ---------------------------------------------------------------------
-def encontrar_planilha_estoque():
-    # Obtém a raiz do projeto independentemente de onde o script é executado
-    caminho_atual = os.path.abspath(__file__)
-    pasta_vistas = os.path.dirname(caminho_atual)
-    raiz_projeto = os.path.dirname(pasta_vistas)
-    
-    caminho_excel = os.path.join(raiz_projeto, "dados", "planilha_estoque.xlsx")
-    
-    if os.path.exists(caminho_excel):
-        return caminho_excel
-    
-    # Fallback caso a estrutura de pastas rode do diretório de trabalho atual
-    caminho_relativo = os.path.join("dados", "planilha_estoque.xlsx")
-    if os.path.exists(caminho_relativo):
-        return os.path.abspath(caminho_relativo)
-        
-    return None
-
-# ---------------------------------------------------------------------
 # PROCESSADOR DA PLANILHA EXCEL
 # ---------------------------------------------------------------------
-def processar_planilha_produtos(caminho_excel):
+def processar_df_produtos(df):
     try:
-        df = pd.read_excel(caminho_excel)
         conn = get_connection()
         c = conn.cursor()
         inseridos = 0
@@ -99,38 +77,47 @@ def processar_planilha_produtos(caminho_excel):
         conn.close()
         return inseridos
     except Exception as e:
-        st.error(f"Erro ao processar a planilha: {e}")
+        st.error(f"Erro ao processar dados da planilha: {e}")
         return 0
 
 # ---------------------------------------------------------------------
-# CONTROLES E BOTÕES DE AÇÃO
+# ÁREA DE CARREGAMENTO E AÇÕES
 # ---------------------------------------------------------------------
-caminho_excel = encontrar_planilha_estoque()
+col_up, col_btn = st.columns([3, 1])
 
-col_imp1, col_imp2, col_imp3 = st.columns([2.5, 1, 1])
+with col_up:
+    arquivo_enviado = st.file_uploader("📂 Envie ou selecione a planilha de estoque (.xlsx)", type=["xlsx"])
 
-with col_imp1:
-    if caminho_excel:
-        st.info(f"📊 Planilha localizada: `{os.path.basename(caminho_excel)}`")
-    else:
-        st.warning("⚠️ Arquivo `planilha_estoque.xlsx` não foi encontrado na pasta `dados`.")
+# Tenta carregar do upload OU direto da pasta local se o arquivo existir
+df_para_importar = None
 
-with col_imp2:
-    if caminho_excel and st.button("🔄 Importar Planilha", use_container_width=True):
-        qtd = processar_planilha_produtos(caminho_excel)
-        if qtd > 0:
-            st.success(f"✅ {qtd} produtos atualizados!")
-            st.rerun()
+if arquivo_enviado:
+    df_para_importar = pd.read_excel(arquivo_enviado)
+else:
+    # Procura na pasta local como fallback
+    caminho_local = os.path.join(os.getcwd(), "dados", "planilha_estoque.xlsx")
+    if os.path.exists(caminho_local):
+        df_para_importar = pd.read_excel(caminho_local)
+        st.info("📊 Planilha encontrada automaticamente na pasta `dados`.")
 
-with col_imp3:
-    if st.button("🗑️ Limpar Banco", use_container_width=True, type="secondary"):
+with col_btn:
+    st.write("") # Espaçamento
+    st.write("")
+    if st.button("🗑️ Limpar Banco", use_container_width=True):
         conn = get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM produtos")
         conn.commit()
         conn.close()
-        st.warning("Todos os produtos foram removidos!")
+        st.warning("Banco zerado com sucesso!")
         st.rerun()
+
+if df_para_importar is not None:
+    if st.button("🔄 Importar Produtos da Planilha", type="primary"):
+        qtd = processar_df_produtos(df_para_importar)
+        if qtd > 0:
+            st.success(f"✅ {qtd} produtos processados no banco de dados!")
+            st.rerun()
 
 st.markdown("---")
 
