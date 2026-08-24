@@ -29,61 +29,70 @@ def garantir_tabela_produtos():
 garantir_tabela_produtos()
 
 # ---------------------------------------------------------------------
-# LOCALIZADOR DE CAMINHO ABSOLUTO
+# BUSCA DINÂMICA PELA PLANILHA NO PROJETO
 # ---------------------------------------------------------------------
-def obter_caminho_planilha_dados():
-    # Sobe 1 nível do arquivo atual (vistas/produtos.py -> Raiz do Projeto)
-    raiz = Path(__file__).resolve().parents[1]
-    caminho = raiz / "dados" / "planilha_estoque.xlsx"
-    if caminho.exists():
-        return str(caminho)
+def localizar_planilha():
+    # Busca 'planilha_estoque.xlsx' em qualquer pasta do projeto
+    raiz_projeto = Path(__file__).resolve().parents[1]
+    for arquivo in raiz_projeto.rglob("planilha_estoque.xlsx"):
+        return str(arquivo)
+    
+    # Busca alternativa pelo diretório de trabalho atual
+    for arquivo in Path.cwd().rglob("planilha_estoque.xlsx"):
+        return str(arquivo)
+        
     return None
 
 # ---------------------------------------------------------------------
-# AUXILIAR PARA PEGAR VALOR DE COLUNA DE FORMA SEGURA
+# EXTRATOR ROBUSTO DE COLUNAS
 # ---------------------------------------------------------------------
-def obter_valor(row, nomes_possiveis, padrao=""):
+def extrair_coluna(row, opcoes_nomes, padrao=""):
     for col in row.index:
-        if str(col).strip().lower() in [n.lower() for n in nomes_possiveis]:
-            val = row[col]
-            if pd.notnull(val):
-                return val
+        col_limpa = str(col).strip().lower()
+        for opcao in opcoes_nomes:
+            if opcao.lower() == col_limpa:
+                val = row[col]
+                if pd.notnull(val):
+                    return val
     return padrao
 
 # ---------------------------------------------------------------------
-# PROCESSADOR DA PLANILHA EXCEL
+# PROCESSADOR DO DATAFRAME
 # ---------------------------------------------------------------------
-def processar_df_produtos(df):
+def processar_dataframe(df):
     try:
         conn = get_connection()
         c = conn.cursor()
         inseridos = 0
 
+        # Normaliza nomes de colunas no DF para facilitar busca
+        df.columns = [str(col).strip() for col in df.columns]
+
         for _, row in df.iterrows():
-            codigo_raw = obter_valor(row, ['Código', 'Codigo', 'Cod'], None)
+            codigo_raw = extrair_coluna(row, ['Código', 'Codigo', 'Cod', 'ID'], None)
             if not codigo_raw or str(codigo_raw).strip().lower() in ['nan', 'none', '']:
                 continue
             codigo = str(codigo_raw).strip()
 
-            nome_raw = obter_valor(row, ['Descrição', 'Descricao', 'Nome', 'Produto'], "PRODUTO SEM NOME")
+            nome_raw = extrair_coluna(row, ['Descrição', 'Descricao', 'Nome', 'Produto', 'Item'], "PRODUTO SEM NOME")
             nome = str(nome_raw).strip()
 
-            unidade_raw = obter_valor(row, ['UN', 'Unidade', 'Un', 'U.M.', 'UM'], "UN")
+            unidade_raw = extrair_coluna(row, ['UN', 'Unidade', 'Un', 'U.M.', 'UM'], "UN")
             unidade = str(unidade_raw).strip()
 
-            estoque_raw = obter_valor(row, ['Estoque', 'Qtd', 'Quantidade', 'Saldo'], 0.0)
+            estoque_raw = extrair_coluna(row, ['Estoque', 'Qtd', 'Quantidade', 'Saldo', 'Estoque Atual'], 0.0)
             try:
-                estoque = float(estoque_raw)
+                estoque = float(str(estoque_raw).replace(",", "."))
             except (ValueError, TypeError):
                 estoque = 0.0
 
-            preco_val = obter_valor(row, ['Vl. Últ. Ent.', 'Vl. Ult. Ent.', 'Preço', 'Preco', 'Valor', 'Vl. Unit.'], 0.0)
-            if pd.isna(preco_val):
+            preco_raw = extrair_coluna(row, ['Vl. Últ. Ent.', 'Vl. Ult. Ent.', 'Preço', 'Preco', 'Valor', 'Vl. Unit.'], 0.0)
+            if pd.isna(preco_raw):
                 preco = 0.0
-            elif isinstance(preco_val, (int, float)):
-                preco = float(preco_val)
+            elif isinstance(preco_raw, (int, float)):
+                preco = float(preco_raw)
             else:
-                p_str = str(preco_val).replace("R$", "").replace("\xa0", "").strip()
+                p_str = str(preco_raw).replace("R$", "").replace("\xa0", "").strip()
                 p_str = p_str.replace(".", "").replace(",", ".")
                 try:
                     preco = float(p_str)
@@ -109,48 +118,48 @@ def processar_df_produtos(df):
         return 0
 
 # ---------------------------------------------------------------------
-# CONTROLES E PAINEL
+# PAINEL DE CONTROLE DE ARQUIVO E BANCO
 # ---------------------------------------------------------------------
-caminho_anexado = obter_caminho_planilha_dados()
+caminho_encontrado = localizar_planilha()
 
-if caminho_anexado:
-    st.success(f"📌 Planilha detectada na pasta `dados`: **`planilha_estoque.xlsx`**")
+if caminho_encontrado:
+    st.success(f"📌 Planilha localizada no servidor: `{caminho_encontrado}`")
 else:
-    st.warning("⚠️ O arquivo `planilha_estoque.xlsx` não foi localizado na pasta `dados`.")
+    st.warning("⚠️ O arquivo `planilha_estoque.xlsx` não foi localizado automaticamente nas pastas do projeto.")
 
-col1, col2, col3 = st.columns([2, 2, 1])
+col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 1.5])
 
-with col1:
-    if caminho_anexado and st.button("🔄 Sincronizar da Pasta 'dados'", type="primary", use_container_width=True):
-        df_local = pd.read_excel(caminho_anexado)
-        qtd = processar_df_produtos(df_local)
+with col_btn1:
+    if caminho_encontrado and st.button("🔄 Importar da Pasta 'dados'", type="primary", use_container_width=True):
+        df_arq = pd.read_excel(caminho_encontrado)
+        qtd = processar_dataframe(df_arq)
         if qtd > 0:
-            st.success(f"✅ {qtd} produtos importados do arquivo local!")
+            st.success(f"✅ {qtd} produtos importados/atualizados com sucesso!")
             st.rerun()
 
-with col2:
-    arquivo_upload = st.file_uploader("Ou envie manualmente (.xlsx)", type=["xlsx"], label_visibility="collapsed")
-    if arquivo_upload:
-        df_upload = pd.read_excel(arquivo_upload)
-        qtd = processar_df_produtos(df_upload)
+with col_btn2:
+    arq_up = st.file_uploader("Upload manual da planilha", type=["xlsx"], label_visibility="collapsed")
+    if arq_up:
+        df_up = pd.read_excel(arq_up)
+        qtd = processar_dataframe(df_up)
         if qtd > 0:
-            st.success(f"✅ {qtd} produtos carregados via upload!")
+            st.success(f"✅ {qtd} produtos importados via upload!")
             st.rerun()
 
-with col3:
-    if st.button("🗑️ Limpar Banco", use_container_width=True):
+with col_btn3:
+    if st.button("🗑️ Zerar Banco de Dados", type="secondary", use_container_width=True):
         conn = get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM produtos")
         conn.commit()
         conn.close()
-        st.warning("Banco zerado!")
+        st.warning("Banco de dados zerado!")
         st.rerun()
 
 st.markdown("---")
 
 # ---------------------------------------------------------------------
-# LISTAGEM DE PRODUTOS
+# EXIBIÇÃO E BUSCA DE PRODUTOS
 # ---------------------------------------------------------------------
 conn = get_connection()
 c = conn.cursor()
