@@ -10,27 +10,53 @@ if not os.path.exists(DB_PATH):
     init_db()
 
 # ---------------------------------------------------------------------
-# IMPORTAÇÃO AUTOMÁTICA DE PRODUTOS E FROTA (DA PASTA 'DADOS')
+# CARREGAMENTO E ATUALIZAÇÃO DAS BASES (PRODUTOS E FROTA)
 # ---------------------------------------------------------------------
-def rodar_atualizacao():
-    if not os.path.exists(DB_PATH): 
+def atualizar_bases_dados():
+    if not os.path.exists(DB_PATH):
         return
         
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # 1. Carregar Veículos do Excel (dados/FROTA.xlsx ou FROTA_importada.xlsx)
+    # 1. ATUALIZAR PRODUTOS (Remove a base antiga e cadastra o novo PDF 286.pdf)
+    pdf_path = os.path.join("dados", "286.pdf")
+    if os.path.exists(pdf_path):
+        try:
+            import pypdf
+            # Apaga toda a base antiga de produtos
+            c.execute("DELETE FROM produtos;")
+            
+            reader = pypdf.PdfReader(pdf_path)
+            for page in reader.pages:
+                texto = page.extract_text()
+                if texto:
+                    for line in texto.splitlines():
+                        m = re.match(r'^(\d{2,6})(.+?)\s+(\d+UN|\d+BL|\d+PT|\d+LT|\d+KG|1|UN|BL|PT|KG|LT|1 PT)\s+([\d\.\,]+)\s+([\d\.\,]+)\s*(UN|BL|PT|KG|LT)?\s*2$', line.strip())
+                        if m:
+                            codigo = m.group(1).strip()
+                            nome = m.group(2).strip()
+                            estoque = float(m.group(4).replace('.','').replace(',','.'))
+                            preco = float(m.group(5).replace('.','').replace(',','.'))
+                            unidade = m.group(6) or "UN"
+                            
+                            c.execute("""
+                                INSERT INTO produtos (codigo, nome, estoque_atual, preco_unitario, unidade)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (codigo, nome, estoque, preco, unidade))
+        except Exception as e:
+            print(f"Erro ao importar PDF de produtos: {e}")
+
+    # 2. ATUALIZAR VEÍCULOS (Lê exatamente o layout do arquivo FROTA.xlsx)
     excel_path = os.path.join("dados", "FROTA.xlsx")
-    if not os.path.exists(excel_path):
-        excel_path = os.path.join("dados", "FROTA_importada.xlsx")
-        
     if os.path.exists(excel_path):
         try:
             wb = openpyxl.load_workbook(excel_path)
             sheet = wb.active
             for row in sheet.iter_rows(min_row=2, values_only=True):
+                # Estrutura: Col 0: PLACA | Col 1: PROPRIEDADE | Col 2: RENAVAM | Col 3: CHASSI | Col 4: MODELO
                 if row and row[0]:
-                    placa = str(row[0]).strip()
+                    placa = str(row[0]).strip().upper()
                     propriedade = str(row[1] or '').strip()
                     renavam = str(row[2] or '').strip()
                     chassi = str(row[3] or '').strip()
@@ -41,32 +67,13 @@ def rodar_atualizacao():
                         VALUES (?, ?, ?, ?, ?, 'Ativo')
                     """, (placa, modelo, renavam, chassi, propriedade))
         except Exception as e:
-            print(f"Erro ao importar frota: {e}")
-
-    # 2. Carregar Produtos do PDF
-    pdf_path = os.path.join("dados", "286.pdf")
-    if os.path.exists(pdf_path):
-        try:
-            import pypdf
-            c.execute("DELETE FROM produtos;")
-            reader = pypdf.PdfReader(pdf_path)
-            for page in reader.pages:
-                for line in page.extract_text().splitlines():
-                    m = re.match(r'^(\d{2,6})(.+?)\s+(\d+UN|\d+BL|\d+PT|\d+LT|\d+KG|1|UN|BL|PT|KG|LT|1 PT)\s+([\d\.\,]+)\s+([\d\.\,]+)\s*(UN|BL|PT|KG|LT)?\s*2$', line.strip())
-                    if m:
-                        c.execute("""
-                            INSERT INTO produtos (codigo, nome, estoque_atual, preco_unitario, unidade)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (m.group(1).strip(), m.group(2).strip(), float(m.group(4).replace('.','').replace(',','.')), float(m.group(5).replace('.','').replace(',','.')), m.group(6) or "UN"))
-            os.rename(pdf_path, os.path.join("dados", "286_importado.pdf"))
-        except Exception as e:
-            print(f"Erro ao importar produtos: {e}")
-        
+            print(f"Erro ao importar Excel da frota: {e}")
+            
     conn.commit()
     conn.close()
 
-# Executa o carregamento
-rodar_atualizacao()
+# Executa o carregamento das bases
+atualizar_bases_dados()
 
 # ---------------------------------------------------------------------
 # CONSULTA PÚBLICA VIA QR CODE
@@ -102,7 +109,7 @@ if "p" in query_params:
     st.stop()
 
 # ---------------------------------------------------------------------
-# ESTILIZAÇÃO DO LOGIN E MENU
+# ESTILIZAÇÃO DA INTERFACE
 # ---------------------------------------------------------------------
 st.markdown(
     """
@@ -141,7 +148,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------
-# LOGIN
+# AUTENTICAÇÃO E LOGIN
 # ---------------------------------------------------------------------
 if "usuario" not in st.session_state:
     st.session_state.usuario = None
@@ -195,7 +202,7 @@ with st.sidebar:
         st.rerun()
 
 # ---------------------------------------------------------------------
-# MENU SUPERIOR
+# NAVEGAÇÃO E ROTAS
 # ---------------------------------------------------------------------
 opcoes_menu = [
     "🏠 Dashboard", "📱 Nova Saída", "📥 Nova Entrada", 
