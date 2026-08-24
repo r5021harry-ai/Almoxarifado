@@ -6,7 +6,7 @@ from database.db import get_connection
 st.markdown("## 📦 Gestão de Produtos")
 
 # ---------------------------------------------------------------------
-# REPARO E GARANTIA DA TABELA DE PRODUTOS
+# GARANTIA DA TABELA DE PRODUTOS
 # ---------------------------------------------------------------------
 def garantir_tabela_produtos():
     conn = get_connection()
@@ -28,14 +28,24 @@ def garantir_tabela_produtos():
 garantir_tabela_produtos()
 
 # ---------------------------------------------------------------------
-# LOCALIZADOR AUTOMÁTICO DA PLANILHA DE ESTOQUE
+# LOCALIZADOR ROBUSTO DA PLANILHA DE ESTOQUE
 # ---------------------------------------------------------------------
 def encontrar_planilha_estoque():
-    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    caminho_excel = os.path.join(raiz, "dados", "planilha_estoque.xlsx")
+    # Obtém a raiz do projeto independentemente de onde o script é executado
+    caminho_atual = os.path.abspath(__file__)
+    pasta_vistas = os.path.dirname(caminho_atual)
+    raiz_projeto = os.path.dirname(pasta_vistas)
+    
+    caminho_excel = os.path.join(raiz_projeto, "dados", "planilha_estoque.xlsx")
     
     if os.path.exists(caminho_excel):
         return caminho_excel
+    
+    # Fallback caso a estrutura de pastas rode do diretório de trabalho atual
+    caminho_relativo = os.path.join("dados", "planilha_estoque.xlsx")
+    if os.path.exists(caminho_relativo):
+        return os.path.abspath(caminho_relativo)
+        
     return None
 
 # ---------------------------------------------------------------------
@@ -44,14 +54,13 @@ def encontrar_planilha_estoque():
 def processar_planilha_produtos(caminho_excel):
     try:
         df = pd.read_excel(caminho_excel)
-        
         conn = get_connection()
         c = conn.cursor()
         inseridos = 0
 
         for _, row in df.iterrows():
             codigo = str(row['Código']).strip() if pd.notnull(row['Código']) else None
-            if not codigo or codigo.lower() == 'nan':
+            if not codigo or codigo.lower() in ['nan', 'none', '']:
                 continue
 
             nome = str(row['Descrição']).strip() if pd.notnull(row['Descrição']) else "PRODUTO SEM NOME"
@@ -59,7 +68,7 @@ def processar_planilha_produtos(caminho_excel):
             
             try:
                 estoque = float(row['Estoque']) if pd.notnull(row['Estoque']) else 0.0
-            except ValueError:
+            except (ValueError, TypeError):
                 estoque = 0.0
 
             preco_val = row.get('Vl. Últ. Ent.', 0.0)
@@ -94,11 +103,12 @@ def processar_planilha_produtos(caminho_excel):
         return 0
 
 # ---------------------------------------------------------------------
-# BOTÃO DE IMPORTAÇÃO E PROCESSAMENTO
+# CONTROLES E BOTÕES DE AÇÃO
 # ---------------------------------------------------------------------
 caminho_excel = encontrar_planilha_estoque()
 
-col_imp1, col_imp2 = st.columns([3, 1])
+col_imp1, col_imp2, col_imp3 = st.columns([2.5, 1, 1])
+
 with col_imp1:
     if caminho_excel:
         st.info(f"📊 Planilha localizada: `{os.path.basename(caminho_excel)}`")
@@ -106,11 +116,21 @@ with col_imp1:
         st.warning("⚠️ Arquivo `planilha_estoque.xlsx` não foi encontrado na pasta `dados`.")
 
 with col_imp2:
-    if caminho_excel and st.button("🔄 Importar da Planilha", use_container_width=True):
+    if caminho_excel and st.button("🔄 Importar Planilha", use_container_width=True):
         qtd = processar_planilha_produtos(caminho_excel)
         if qtd > 0:
             st.success(f"✅ {qtd} produtos atualizados!")
             st.rerun()
+
+with col_imp3:
+    if st.button("🗑️ Limpar Banco", use_container_width=True, type="secondary"):
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM produtos")
+        conn.commit()
+        conn.close()
+        st.warning("Todos os produtos foram removidos!")
+        st.rerun()
 
 st.markdown("---")
 
@@ -157,4 +177,4 @@ if produtos:
                 conn.close()
                 st.rerun()
 else:
-    st.info("Nenhum produto cadastrado.")
+    st.info("Nenhum produto cadastrado no banco de dados.")
