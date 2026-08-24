@@ -5,6 +5,43 @@ from database.db import get_connection
 st.markdown("## 🚗 Veículos e Frota")
 
 # ---------------------------------------------------------------------
+# REPARO AUTOMÁTICO DO BANCO DE DADOS (GARANTE TODAS AS COLUNAS)
+# ---------------------------------------------------------------------
+def garantir_estrutura_banco():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS veiculos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            placa TEXT UNIQUE NOT NULL
+        )
+    """)
+    
+    colunas_necessarias = {
+        'propriedade': 'TEXT',
+        'renavam': 'TEXT',
+        'chassi': 'TEXT',
+        'modelo': 'TEXT',
+        'status': "TEXT DEFAULT 'Ativo'"
+    }
+    
+    c.execute("PRAGMA table_info(veiculos)")
+    colunas_existentes = [col[1] for col in c.fetchall()]
+    
+    for coluna, tipo in colunas_necessarias.items():
+        if coluna not in colunas_existentes:
+            try:
+                c.execute(f"ALTER TABLE veiculos ADD COLUMN {coluna} {tipo}")
+            except Exception:
+                pass
+                
+    conn.commit()
+    conn.close()
+
+# Executa o reparo antes de qualquer consulta
+garantir_estrutura_banco()
+
+# ---------------------------------------------------------------------
 # LOCALIZADOR AUTOMÁTICO DA PLANILHA
 # ---------------------------------------------------------------------
 def encontrar_arquivo_frota():
@@ -16,10 +53,10 @@ def encontrar_arquivo_frota():
     return None
 
 # ---------------------------------------------------------------------
-# FUNÇÃO DE IMPORTAÇÃO SEGUINDO A ORDEM DA PLANILHA:
-# [0]: PLACA | [1]: PROPRIEDADE | [2]: RENAVAM | [3]: CHASSI | [4]: MODELO
+# IMPORTAÇÃO DA PLANILHA (PADRÃO: PLACA | PROPRIEDADE | RENAVAM | CHASSI | MODELO)
 # ---------------------------------------------------------------------
 def processar_excel_frota(arquivo_ou_caminho):
+    garantir_estrutura_banco()
     try:
         wb = openpyxl.load_workbook(arquivo_ou_caminho)
         sheet = wb.active
@@ -53,7 +90,7 @@ def processar_excel_frota(arquivo_ou_caminho):
         st.error(f"Erro ao processar planilha de frota: {e}")
         return 0
 
-# Tenta carregar automaticamente se o banco estiver sem registros
+# Tenta carregar automaticamente se a tabela estiver vazia
 conn = get_connection()
 c = conn.cursor()
 c.execute("SELECT COUNT(*) FROM veiculos")
@@ -123,7 +160,7 @@ if btn_salvar:
 st.markdown("---")
 
 # ---------------------------------------------------------------------
-# LISTAGEM DA FROTA (NA MESMA ORDEM DA PLANILHA)
+# LISTAGEM DA FROTA
 # ---------------------------------------------------------------------
 conn = get_connection()
 c = conn.cursor()
@@ -134,7 +171,6 @@ conn.close()
 if veiculos:
     st.subheader(f"Frota Cadastrada ({len(veiculos)} veículos)")
     
-    # Cabeçalho baseado na planilha
     c_placa, c_prop, c_ren, c_cha, c_mod, c_stat, c_act = st.columns([2, 2, 2, 2, 3, 1, 2])
     c_placa.markdown("**Placa**")
     c_prop.markdown("**Propriedade**")
