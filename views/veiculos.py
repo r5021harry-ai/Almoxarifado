@@ -5,61 +5,53 @@ from database.db import get_connection
 st.markdown("## 🚗 Veículos e Frota")
 
 # ---------------------------------------------------------------------
-# IMPORTAÇÃO AUTOMÁTICA DO EXCEL DA FROTA
+# LOCALIZADOR AUTOMÁTICO DO ARQUIVO FROTA.XLSX
 # ---------------------------------------------------------------------
-def carregar_frota_excel():
-    # Procura a pasta 'dados' em múltiplos locais possíveis no servidor
-    diretorio_atual = os.path.dirname(os.path.abspath(__file__))
-    raiz_projeto = os.path.dirname(diretorio_atual)
+def encontrar_arquivo_frota():
+    # Pega o diretório raiz do projeto (um nível acima da pasta 'vistas')
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
-    caminhos_possiveis = [
-        os.path.join(raiz_projeto, "dados", "FROTA.xlsx"),
-        os.path.join(raiz_projeto, "dados", "frota.xlsx"),
-        "/mount/src/almoxarifado/dados/FROTA.xlsx",
-        "/mount/src/almoxarifado/dados/frota.xlsx",
-        os.path.join(os.getcwd(), "dados", "FROTA.xlsx")
-    ]
-    
-    excel_encontrado = None
-    for p in caminhos_possiveis:
-        if os.path.exists(p):
-            excel_encontrado = p
-            break
+    # Busca recursiva por qualquer arquivo que contenha 'FROTA' e termine em '.xlsx'
+    for pasta_atual, _, arquivos in os.walk(raiz):
+        for arquivo in arquivos:
+            if "frota" in arquivo.lower() and arquivo.lower().endswith(".xlsx"):
+                return os.path.join(pasta_atual, arquivo)
+    return None
 
-    if excel_encontrado:
-        try:
-            wb = openpyxl.load_workbook(excel_encontrado)
-            sheet = wb.active
-            conn = get_connection()
-            c = conn.cursor()
-            
-            inseridos = 0
-            for row in sheet.iter_rows(min_row=2, values_only=True):
-                # Layout: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
-                if row and row[0]:
-                    placa = str(row[0]).strip().upper()
-                    propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
-                    renavam = str(row[2] or '').strip() if len(row) > 2 else ''
-                    chassi = str(row[3] or '').strip() if len(row) > 3 else ''
-                    modelo = str(row[4] or '').strip() if len(row) > 4 else ''
-                    
-                    c.execute("""
-                        INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade, status)
-                        VALUES (?, ?, ?, ?, ?, 'Ativo')
-                    """, (placa, modelo, renavam, chassi, propriedade))
-                    inseridos += 1
-                    
-            conn.commit()
-            conn.close()
-            return inseridos
-        except Exception as e:
-            st.error(f"Erro ao ler arquivo da frota: {e}")
-            return 0
-    else:
-        st.warning("⚠️ O arquivo 'FROTA.xlsx' ainda não foi localizado na pasta 'dados'.")
+# ---------------------------------------------------------------------
+# FUNÇÃO DE IMPORTAÇÃO DA PLANILHA
+# ---------------------------------------------------------------------
+def processar_excel_frota(arquivo_ou_caminho):
+    try:
+        wb = openpyxl.load_workbook(arquivo_ou_caminho)
+        sheet = wb.active
+        conn = get_connection()
+        c = conn.cursor()
+        
+        inseridos = 0
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            # Layout das colunas: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
+            if row and row[0]:
+                placa = str(row[0]).strip().upper()
+                propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
+                renavam = str(row[2] or '').strip() if len(row) > 2 else ''
+                chassi = str(row[3] or '').strip() if len(row) > 3 else ''
+                modelo = str(row[4] or '').strip() if len(row) > 4 else ''
+                
+                c.execute("""
+                    INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade, status)
+                    VALUES (?, ?, ?, ?, ?, 'Ativo')
+                """, (placa, modelo, renavam, chassi, propriedade))
+                inseridos += 1
+                
+        conn.commit()
+        conn.close()
+        return inseridos
+    except Exception as e:
+        st.error(f"Erro ao processar planilha de frota: {e}")
         return 0
 
-# Tenta carregar se a tabela estiver vazia
+# Tenta carregar automaticamente se a tabela estiver vazia
 conn = get_connection()
 c = conn.cursor()
 c.execute("SELECT COUNT(*) FROM veiculos")
@@ -67,10 +59,25 @@ total_veiculos = c.fetchone()[0]
 conn.close()
 
 if total_veiculos == 0:
-    qtd = carregar_frota_excel()
-    if qtd > 0:
-        st.success(f"✅ {qtd} veículos importados com sucesso da planilha!")
-        st.rerun()
+    caminho_frota = encontrar_arquivo_frota()
+    if caminho_frota:
+        qtd = processar_excel_frota(caminho_frota)
+        if qtd > 0:
+            st.success(f"✅ {qtd} veículos importados automaticamente do arquivo `{os.path.basename(caminho_frota)}`!")
+            st.rerun()
+
+# ---------------------------------------------------------------------
+# IMPORTAÇÃO MANUAL VIA UPLOAD (ÁREA EXPANSÍVEL)
+# ---------------------------------------------------------------------
+with st.expander("📥 Importar Planilha de Frota (Upload Manual)", expanded=(total_veiculos == 0)):
+    st.write("Se preferir, envie o arquivo `FROTA.xlsx` diretamente do seu computador:")
+    file_upload = st.file_uploader("Selecione o arquivo Excel", type=["xlsx", "xls"], key="uploader_frota")
+    if file_upload is not None:
+        if st.button("Confirmar Importação", use_container_width=True):
+            qtd = processar_excel_frota(file_upload)
+            if qtd > 0:
+                st.success(f"✅ {qtd} veículos cadastrados com sucesso!")
+                st.rerun()
 
 # ---------------------------------------------------------------------
 # FORMULÁRIO DE CADASTRO MANUAL
@@ -162,4 +169,4 @@ if veiculos:
             conn.close()
             st.rerun()
 else:
-    st.info("Nenhum veículo cadastrado no momento.")
+    st.info("Nenhum veículo cadastrado no momento. A varredura não localizou a planilha ou a tabela está vazia.")
