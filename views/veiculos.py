@@ -5,13 +5,10 @@ from database.db import get_connection
 st.markdown("## 🚗 Veículos e Frota")
 
 # ---------------------------------------------------------------------
-# LOCALIZADOR AUTOMÁTICO DO ARQUIVO FROTA.XLSX
+# LOCALIZADOR AUTOMÁTICO DA PLANILHA
 # ---------------------------------------------------------------------
 def encontrar_arquivo_frota():
-    # Pega o diretório raiz do projeto (um nível acima da pasta 'vistas')
     raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Busca recursiva por qualquer arquivo que contenha 'FROTA' e termine em '.xlsx'
     for pasta_atual, _, arquivos in os.walk(raiz):
         for arquivo in arquivos:
             if "frota" in arquivo.lower() and arquivo.lower().endswith(".xlsx"):
@@ -19,7 +16,8 @@ def encontrar_arquivo_frota():
     return None
 
 # ---------------------------------------------------------------------
-# FUNÇÃO DE IMPORTAÇÃO DA PLANILHA
+# FUNÇÃO DE IMPORTAÇÃO SEGUINDO A ORDEM DA PLANILHA:
+# [0]: PLACA | [1]: PROPRIEDADE | [2]: RENAVAM | [3]: CHASSI | [4]: MODELO
 # ---------------------------------------------------------------------
 def processar_excel_frota(arquivo_ou_caminho):
     try:
@@ -30,7 +28,6 @@ def processar_excel_frota(arquivo_ou_caminho):
         
         inseridos = 0
         for row in sheet.iter_rows(min_row=2, values_only=True):
-            # Layout das colunas: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
             if row and row[0]:
                 placa = str(row[0]).strip().upper()
                 propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
@@ -39,9 +36,14 @@ def processar_excel_frota(arquivo_ou_caminho):
                 modelo = str(row[4] or '').strip() if len(row) > 4 else ''
                 
                 c.execute("""
-                    INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade, status)
+                    INSERT INTO veiculos (placa, propriedade, renavam, chassi, modelo, status)
                     VALUES (?, ?, ?, ?, ?, 'Ativo')
-                """, (placa, modelo, renavam, chassi, propriedade))
+                    ON CONFLICT(placa) DO UPDATE SET
+                        propriedade=excluded.propriedade,
+                        renavam=excluded.renavam,
+                        chassi=excluded.chassi,
+                        modelo=excluded.modelo
+                """, (placa, propriedade, renavam, chassi, modelo))
                 inseridos += 1
                 
         conn.commit()
@@ -51,7 +53,7 @@ def processar_excel_frota(arquivo_ou_caminho):
         st.error(f"Erro ao processar planilha de frota: {e}")
         return 0
 
-# Tenta carregar automaticamente se a tabela estiver vazia
+# Tenta carregar automaticamente se o banco estiver sem registros
 conn = get_connection()
 c = conn.cursor()
 c.execute("SELECT COUNT(*) FROM veiculos")
@@ -63,14 +65,14 @@ if total_veiculos == 0:
     if caminho_frota:
         qtd = processar_excel_frota(caminho_frota)
         if qtd > 0:
-            st.success(f"✅ {qtd} veículos importados automaticamente do arquivo `{os.path.basename(caminho_frota)}`!")
+            st.success(f"✅ {qtd} veículos importados com sucesso!")
             st.rerun()
 
 # ---------------------------------------------------------------------
-# IMPORTAÇÃO MANUAL VIA UPLOAD (ÁREA EXPANSÍVEL)
+# IMPORTAÇÃO MANUAL VIA UPLOAD
 # ---------------------------------------------------------------------
 with st.expander("📥 Importar Planilha de Frota (Upload Manual)", expanded=(total_veiculos == 0)):
-    st.write("Se preferir, envie o arquivo `FROTA.xlsx` diretamente do seu computador:")
+    st.write("Envie a planilha `FROTA.xlsx` organizada nas colunas: **PLACA | PROPRIEDADE | RENAVAM | CHASSI | MODELO**")
     file_upload = st.file_uploader("Selecione o arquivo Excel", type=["xlsx", "xls"], key="uploader_frota")
     if file_upload is not None:
         if st.button("Confirmar Importação", use_container_width=True):
@@ -86,11 +88,11 @@ with st.form("form_veiculo", clear_on_submit=True):
     col_a, col_b = st.columns(2)
     with col_a:
         placa = st.text_input("Placa / Identificação")
-        modelo = st.text_input("Modelo / Descrição")
         propriedade = st.text_input("Propriedade (ex: Próprio, Locado)")
-    with col_b:
         renavam = st.text_input("Renavam")
+    with col_b:
         chassi = st.text_input("Chassi")
+        modelo = st.text_input("Modelo / Descrição")
         
     btn_salvar = st.form_submit_button("➕ Adicionar Veículo", use_container_width=True)
 
@@ -101,16 +103,16 @@ if btn_salvar:
         c = conn.cursor()
         try:
             c.execute("""
-                INSERT INTO veiculos (placa, modelo, renavam, chassi, propriedade, status) 
+                INSERT INTO veiculos (placa, propriedade, renavam, chassi, modelo, status) 
                 VALUES (?, ?, ?, ?, ?, 'Ativo')
-            """, (placa_limpa, modelo.strip(), renavam.strip(), chassi.strip(), propriedade.strip()))
+            """, (placa_limpa, propriedade.strip(), renavam.strip(), chassi.strip(), modelo.strip()))
             conn.commit()
             st.success(f"Veículo '{placa_limpa}' cadastrado com sucesso!")
             st.rerun()
         except Exception as e:
             conn.rollback()
             if "UNIQUE" in str(e):
-                st.error(f"A placa '{placa_limpa}' já está cadastrada no sistema.")
+                st.error(f"A placa '{placa_limpa}' já está cadastrada.")
             else:
                 st.error(f"Erro ao salvar veículo: {e}")
         finally:
@@ -121,7 +123,7 @@ if btn_salvar:
 st.markdown("---")
 
 # ---------------------------------------------------------------------
-# LISTAGEM DOS VEÍCULOS
+# LISTAGEM DA FROTA (NA MESMA ORDEM DA PLANILHA)
 # ---------------------------------------------------------------------
 conn = get_connection()
 c = conn.cursor()
@@ -132,28 +134,33 @@ conn.close()
 if veiculos:
     st.subheader(f"Frota Cadastrada ({len(veiculos)} veículos)")
     
-    c_placa, c_mod, c_prop, c_stat, c_acoes = st.columns([2, 3, 2, 2, 3])
+    # Cabeçalho baseado na planilha
+    c_placa, c_prop, c_ren, c_cha, c_mod, c_stat, c_act = st.columns([2, 2, 2, 2, 3, 1, 2])
     c_placa.markdown("**Placa**")
-    c_mod.markdown("**Modelo**")
     c_prop.markdown("**Propriedade**")
+    c_ren.markdown("**Renavam**")
+    c_cha.markdown("**Chassi**")
+    c_mod.markdown("**Modelo**")
     c_stat.markdown("**Status**")
-    c_acoes.markdown("**Ações**")
+    c_act.markdown("**Ações**")
     st.divider()
 
     for v in veiculos:
-        col_p, col_m, col_pr, col_s, col_b = st.columns([2, 3, 2, 2, 3])
+        col_p, col_pr, col_r, col_c, col_m, col_s, col_b = st.columns([2, 2, 2, 2, 3, 1, 2])
         
         col_p.write(f"**{v.get('placa', '')}**")
-        col_m.write(v.get('modelo', '-') or '-')
         col_pr.write(v.get('propriedade', '-') or '-')
+        col_r.write(v.get('renavam', '-') or '-')
+        col_c.write(v.get('chassi', '-') or '-')
+        col_m.write(v.get('modelo', '-') or '-')
         
         status_atual = v.get('status', 'Ativo') or 'Ativo'
-        col_s.write("🟢 Ativo" if status_atual == "Ativo" else "🔴 Inativo")
+        col_s.write("🟢" if status_atual == "Ativo" else "🔴")
         
         btn_col1, btn_col2 = col_b.columns(2)
-        
         novo_status = "Inativo" if status_atual == "Ativo" else "Ativo"
-        if btn_col1.button("Status", key=f"btn_st_{v['id']}", use_container_width=True):
+        
+        if btn_col1.button("🔄", key=f"btn_st_{v['id']}", help="Alterar Status"):
             conn = get_connection()
             c = conn.cursor()
             c.execute("UPDATE veiculos SET status = ? WHERE id = ?", (novo_status, v["id"]))
@@ -161,7 +168,7 @@ if veiculos:
             conn.close()
             st.rerun()
 
-        if btn_col2.button("🗑️ Excluir", key=f"btn_del_{v['id']}", use_container_width=True):
+        if btn_col2.button("🗑️", key=f"btn_del_{v['id']}", help="Excluir Veículo"):
             conn = get_connection()
             c = conn.cursor()
             c.execute("DELETE FROM veiculos WHERE id = ?", (v["id"],))
@@ -169,4 +176,4 @@ if veiculos:
             conn.close()
             st.rerun()
 else:
-    st.info("Nenhum veículo cadastrado no momento. A varredura não localizou a planilha ou a tabela está vazia.")
+    st.info("Nenhum veículo cadastrado no momento.")
