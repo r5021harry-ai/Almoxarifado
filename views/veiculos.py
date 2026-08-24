@@ -1,55 +1,57 @@
 import streamlit as st
-import os, sqlite3, openpyxl
-from database.db import get_connection, DB_PATH
+import os, openpyxl
+from database.db import get_connection
 
 st.markdown("## 🚗 Veículos e Frota")
 
 # ---------------------------------------------------------------------
-# FUNÇÃO PARA IMPORTAR DIRETO DO EXCEL SE O BANCO ESTIVER VAZIO
+# FUNÇÃO DE IMPORTAÇÃO DIRETA DA PLANILHA FROTA.xlsx
 # ---------------------------------------------------------------------
 def carregar_frota_excel():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) as total FROM veiculos")
-    total = c.fetchone()[0]
-    
-    # Se não houver veículos cadastrados no SQLite, busca nas planilhas da pasta 'dados'
-    if total == 0:
-        caminhos_possiveis = [
-            os.path.join("dados", "FROTA.xlsx"),
-            os.path.join("dados", "FROTA_importada.xlsx"),
-            os.path.join("dados", "frota.xlsx")
-        ]
-        
-        for excel_path in caminhos_possiveis:
-            if os.path.exists(excel_path):
-                try:
-                    wb = openpyxl.load_workbook(excel_path)
-                    sheet = wb.active
-                    inseridos = 0
-                    for row in sheet.iter_rows(min_row=2, values_only=True):
-                        if row and row[0]:
-                            placa = str(row[0]).strip().upper()
-                            propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
-                            renavam = str(row[2] or '').strip() if len(row) > 2 else ''
-                            chassi = str(row[3] or '').strip() if len(row) > 3 else ''
-                            modelo = str(row[4] or '').strip() if len(row) > 4 else ''
-                            
-                            c.execute("""
-                                INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade, status)
-                                VALUES (?, ?, ?, ?, ?, 'Ativo')
-                            """, (placa, modelo, renavam, chassi, propriedade))
-                            inseridos += 1
-                    conn.commit()
-                    if inseridos > 0:
-                        st.success(f"✅ {inseridos} veículos importados com sucesso da planilha!")
-                        break
-                except Exception as e:
-                    st.error(f"Erro ao ler arquivo Excel ({excel_path}): {e}")
-    conn.close()
+    excel_path = os.path.join("dados", "FROTA.xlsx")
+    if os.path.exists(excel_path):
+        try:
+            wb = openpyxl.load_workbook(excel_path)
+            sheet = wb.active
+            conn = get_connection()
+            c = conn.cursor()
+            
+            inseridos = 0
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                # Colunas da imagem: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
+                if row and row[0]:
+                    placa = str(row[0]).strip().upper()
+                    propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
+                    renavam = str(row[2] or '').strip() if len(row) > 2 else ''
+                    chassi = str(row[3] or '').strip() if len(row) > 3 else ''
+                    modelo = str(row[4] or '').strip() if len(row) > 4 else ''
+                    
+                    c.execute("""
+                        INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade, status)
+                        VALUES (?, ?, ?, ?, ?, 'Ativo')
+                    """, (placa, modelo, renavam, chassi, propriedade))
+                    inseridos += 1
+                    
+            conn.commit()
+            conn.close()
+            return inseridos
+        except Exception as e:
+            st.error(f"Erro ao ler arquivo FROTA.xlsx: {e}")
+            return 0
+    return 0
 
-# Executa a checagem/importação
-carregar_frota_excel()
+# Executa a importação automática caso a tabela esteja vazia
+conn = get_connection()
+c = conn.cursor()
+c.execute("SELECT COUNT(*) FROM veiculos")
+total_veiculos = c.fetchone()[0]
+conn.close()
+
+if total_veiculos == 0:
+    qtd = carregar_frota_excel()
+    if qtd > 0:
+        st.success(f"✅ {qtd} veículos importados com sucesso da planilha!")
+        st.rerun()
 
 # ---------------------------------------------------------------------
 # FORMULÁRIO DE CADASTRO MANUAL
@@ -104,7 +106,6 @@ conn.close()
 if veiculos:
     st.subheader(f"Frota Cadastrada ({len(veiculos)} veículos)")
     
-    # Cabeçalho da Tabela
     c_placa, c_mod, c_prop, c_stat, c_acoes = st.columns([2, 3, 2, 2, 3])
     c_placa.markdown("**Placa**")
     c_mod.markdown("**Modelo**")
@@ -142,4 +143,4 @@ if veiculos:
             conn.close()
             st.rerun()
 else:
-    st.info("Nenhum veículo cadastrado no banco de dados e nenhuma planilha encontrada na pasta 'dados'.")
+    st.info("Nenhum veículo cadastrado no momento.")
