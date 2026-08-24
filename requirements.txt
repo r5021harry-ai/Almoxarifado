@@ -6,3 +6,5 @@ qrcode
 pillow
 opencv-python-headless
 reportlab
+pdfplumber
+openpyxl
