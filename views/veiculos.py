@@ -5,27 +5,37 @@ from database.db import get_connection
 st.markdown("## 🚗 Veículos e Frota")
 
 # ---------------------------------------------------------------------
-# FUNÇÃO DE IMPORTAÇÃO COM CAMINHO ABSOLUTO
+# IMPORTAÇÃO AUTOMÁTICA DO EXCEL DA FROTA
 # ---------------------------------------------------------------------
 def carregar_frota_excel():
-    # Obtém o diretório raiz do projeto dinamicamente
-    diretorio_raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    excel_path = os.path.join(diretorio_raiz, "dados", "FROTA.xlsx")
+    # Procura a pasta 'dados' em múltiplos locais possíveis no servidor
+    diretorio_atual = os.path.dirname(os.path.abspath(__file__))
+    raiz_projeto = os.path.dirname(diretorio_atual)
     
-    if not os.path.exists(excel_path):
-        # Tenta com o nome em minúsculo por garantia
-        excel_path = os.path.join(diretorio_raiz, "dados", "frota.xlsx")
+    caminhos_possiveis = [
+        os.path.join(raiz_projeto, "dados", "FROTA.xlsx"),
+        os.path.join(raiz_projeto, "dados", "frota.xlsx"),
+        "/mount/src/almoxarifado/dados/FROTA.xlsx",
+        "/mount/src/almoxarifado/dados/frota.xlsx",
+        os.path.join(os.getcwd(), "dados", "FROTA.xlsx")
+    ]
+    
+    excel_encontrado = None
+    for p in caminhos_possiveis:
+        if os.path.exists(p):
+            excel_encontrado = p
+            break
 
-    if os.path.exists(excel_path):
+    if excel_encontrado:
         try:
-            wb = openpyxl.load_workbook(excel_path)
+            wb = openpyxl.load_workbook(excel_encontrado)
             sheet = wb.active
             conn = get_connection()
             c = conn.cursor()
             
             inseridos = 0
             for row in sheet.iter_rows(min_row=2, values_only=True):
-                # Estrutura das colunas: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
+                # Layout: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
                 if row and row[0]:
                     placa = str(row[0]).strip().upper()
                     propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
@@ -46,7 +56,7 @@ def carregar_frota_excel():
             st.error(f"Erro ao ler arquivo da frota: {e}")
             return 0
     else:
-        st.warning(f"O arquivo não foi localizado no caminho: `{excel_path}`")
+        st.warning("⚠️ O arquivo 'FROTA.xlsx' ainda não foi localizado na pasta 'dados'.")
         return 0
 
 # Tenta carregar se a tabela estiver vazia
@@ -59,7 +69,7 @@ conn.close()
 if total_veiculos == 0:
     qtd = carregar_frota_excel()
     if qtd > 0:
-        st.success(f"✅ {qtd} veículos importados com sucesso!")
+        st.success(f"✅ {qtd} veículos importados com sucesso da planilha!")
         st.rerun()
 
 # ---------------------------------------------------------------------
