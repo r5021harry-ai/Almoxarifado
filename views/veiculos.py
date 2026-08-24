@@ -5,10 +5,17 @@ from database.db import get_connection
 st.markdown("## 🚗 Veículos e Frota")
 
 # ---------------------------------------------------------------------
-# FUNÇÃO DE IMPORTAÇÃO DIRETA DA PLANILHA FROTA.xlsx
+# FUNÇÃO DE IMPORTAÇÃO COM CAMINHO ABSOLUTO
 # ---------------------------------------------------------------------
 def carregar_frota_excel():
-    excel_path = os.path.join("dados", "FROTA.xlsx")
+    # Obtém o diretório raiz do projeto dinamicamente
+    diretorio_raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    excel_path = os.path.join(diretorio_raiz, "dados", "FROTA.xlsx")
+    
+    if not os.path.exists(excel_path):
+        # Tenta com o nome em minúsculo por garantia
+        excel_path = os.path.join(diretorio_raiz, "dados", "frota.xlsx")
+
     if os.path.exists(excel_path):
         try:
             wb = openpyxl.load_workbook(excel_path)
@@ -18,7 +25,7 @@ def carregar_frota_excel():
             
             inseridos = 0
             for row in sheet.iter_rows(min_row=2, values_only=True):
-                # Colunas da imagem: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
+                # Estrutura das colunas: 0: PLACA | 1: PROPRIEDADE | 2: RENAVAM | 3: CHASSI | 4: MODELO
                 if row and row[0]:
                     placa = str(row[0]).strip().upper()
                     propriedade = str(row[1] or '').strip() if len(row) > 1 else ''
@@ -36,11 +43,13 @@ def carregar_frota_excel():
             conn.close()
             return inseridos
         except Exception as e:
-            st.error(f"Erro ao ler arquivo FROTA.xlsx: {e}")
+            st.error(f"Erro ao ler arquivo da frota: {e}")
             return 0
-    return 0
+    else:
+        st.warning(f"O arquivo não foi localizado no caminho: `{excel_path}`")
+        return 0
 
-# Executa a importação automática caso a tabela esteja vazia
+# Tenta carregar se a tabela estiver vazia
 conn = get_connection()
 c = conn.cursor()
 c.execute("SELECT COUNT(*) FROM veiculos")
@@ -50,7 +59,7 @@ conn.close()
 if total_veiculos == 0:
     qtd = carregar_frota_excel()
     if qtd > 0:
-        st.success(f"✅ {qtd} veículos importados com sucesso da planilha!")
+        st.success(f"✅ {qtd} veículos importados com sucesso!")
         st.rerun()
 
 # ---------------------------------------------------------------------
