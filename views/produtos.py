@@ -1,6 +1,6 @@
 import streamlit as st
-import os, re
-import pdfplumber
+import os
+import pandas as pd
 from database.db import get_connection
 
 st.markdown("## 📦 Gestão de Produtos")
@@ -16,7 +16,7 @@ def garantir_tabela_produtos():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             codigo TEXT UNIQUE,
             nome TEXT NOT NULL,
-            categoria TEXT,
+            categoria TEXT DEFAULT 'TRANSPORTE',
             estoque REAL DEFAULT 0,
             unidade TEXT DEFAULT 'UN',
             preco REAL DEFAULT 0.0
@@ -28,96 +28,86 @@ def garantir_tabela_produtos():
 garantir_tabela_produtos()
 
 # ---------------------------------------------------------------------
-# LOCALIZADOR AUTOMÁTICO DO PDF "286"
+# LOCALIZADOR AUTOMÁTICO DA PLANILHA DE ESTOQUE
 # ---------------------------------------------------------------------
-def encontrar_pdf_286():
+def encontrar_planilha_estoque():
     raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    pasta_dados = os.path.join(raiz, "dados")
+    caminho_excel = os.path.join(raiz, "dados", "planilha_estoque.xlsx")
     
-    if os.path.exists(pasta_dados):
-        for arq in os.listdir(pasta_dados):
-            if "286" in arq and arq.lower().endswith(".pdf"):
-                return os.path.join(pasta_dados, arq)
-                
-    # Busca secundária por todo o diretório se não achar direto na pasta dados
-    for pasta_atual, _, arquivos in os.walk(raiz):
-        for arq in arquivos:
-            if "286" in arq and arq.lower().endswith(".pdf"):
-                return os.path.join(pasta_atual, arq)
+    if os.path.exists(caminho_excel):
+        return caminho_excel
     return None
 
 # ---------------------------------------------------------------------
-# PROCESSADOR DO PDF (EXTRAÇÃO DE DADOS)
+# PROCESSADOR DA PLANILHA EXCEL
 # ---------------------------------------------------------------------
-def processar_pdf_produtos(caminho_pdf):
+def processar_planilha_produtos(caminho_excel):
     try:
+        df = pd.read_excel(caminho_excel)
+        
         conn = get_connection()
         c = conn.cursor()
         inseridos = 0
 
-        with pdfplumber.open(caminho_pdf) as pdf:
-            for page in pdf.pages:
-                # Tenta extrair como tabela
-                tabelas = page.extract_tables()
-                for tabela in tabelas:
-                    for linha in tabela:
-                        if not linha or len(linha) < 2:
-                            continue
-                        
-                        # Limpeza de texto
-                        texto_linha = [str(cell).strip() if cell else "" for cell in linha]
-                        
-                        # Tenta identificar código, nome e estoque
-                        # Padrão comum: [CÓDIGO, NOME/DESCRIÇÃO, UNIDADE, ESTOQUE, PREÇO]
-                        codigo = texto_linha[0]
-                        if not codigo.isdigit() and len(codigo) < 2:
-                            continue  # Pula cabeçalhos
-                            
-                        nome = texto_linha[1] if len(texto_linha) > 1 else "PRODUTO SEM NOME"
-                        unidade = texto_linha[2] if len(texto_linha) > 2 and len(texto_linha[2]) <= 3 else "UN"
-                        
-                        # Tenta converter estoque para número
-                        qtd = 0.0
-                        for val in texto_linha[2:]:
-                            val_limpo = val.replace(".", "").replace(",", ".")
-                            try:
-                                qtd = float(val_limpo)
-                                break
-                            except ValueError:
-                                continue
+        for _, row in df.iterrows():
+            codigo = str(row['Código']).strip() if pd.notnull(row['Código']) else None
+            if not codigo or codigo.lower() == 'nan':
+                continue
 
-                        c.execute("""
-                            INSERT INTO produtos (codigo, nome, categoria, estoque, unidade, preco)
-                            VALUES (?, ?, 'Geral', ?, ?, 0.0)
-                            ON CONFLICT(codigo) DO UPDATE SET
-                                nome=excluded.nome,
-                                estoque=excluded.estoque,
-                                unidade=excluded.unidade
-                        """, (codigo, nome, qtd, unidade))
-                        inseridos += 1
-                        
+            nome = str(row['Descrição']).strip() if pd.notnull(row['Descrição']) else "PRODUTO SEM NOME"
+            unidade = str(row['UN']).strip() if pd.notnull(row['UN']) else "UN"
+            
+            try:
+                estoque = float(row['Estoque']) if pd.notnull(row['Estoque']) else 0.0
+            except ValueError:
+                estoque = 0.0
+
+            preco_val = row.get('Vl. Últ. Ent.', 0.0)
+            if pd.isna(preco_val):
+                preco = 0.0
+            elif isinstance(preco_val, (int, float)):
+                preco = float(preco_val)
+            else:
+                p_str = str(preco_val).replace("R$", "").replace("\xa0", "").strip()
+                p_str = p_str.replace(".", "").replace(",", ".")
+                try:
+                    preco = float(p_str)
+                except ValueError:
+                    preco = 0.0
+
+            c.execute("""
+                INSERT INTO produtos (codigo, nome, categoria, estoque, unidade, preco)
+                VALUES (?, ?, 'TRANSPORTE', ?, ?, ?)
+                ON CONFLICT(codigo) DO UPDATE SET
+                    nome=excluded.nome,
+                    estoque=excluded.estoque,
+                    unidade=excluded.unidade,
+                    preco=excluded.preco
+            """, (codigo, nome, estoque, unidade, preco))
+            inseridos += 1
+
         conn.commit()
         conn.close()
         return inseridos
     except Exception as e:
-        st.error(f"Erro ao ler PDF: {e}")
+        st.error(f"Erro ao processar a planilha: {e}")
         return 0
 
 # ---------------------------------------------------------------------
 # BOTÃO DE IMPORTAÇÃO E PROCESSAMENTO
 # ---------------------------------------------------------------------
-caminho_pdf = encontrar_pdf_286()
+caminho_excel = encontrar_planilha_estoque()
 
 col_imp1, col_imp2 = st.columns([3, 1])
 with col_imp1:
-    if caminho_pdf:
-        st.info(f"📄 Arquivo localizado: `{os.path.basename(caminho_pdf)}`")
+    if caminho_excel:
+        st.info(f"📊 Planilha localizada: `{os.path.basename(caminho_excel)}`")
     else:
-        st.warning("⚠️ Nenhum arquivo PDF contendo '286' foi encontrado na pasta `dados`.")
+        st.warning("⚠️ Arquivo `planilha_estoque.xlsx` não foi encontrado na pasta `dados`.")
 
 with col_imp2:
-    if caminho_pdf and st.button("🔄 Importar do PDF 286", use_container_width=True):
-        qtd = processar_pdf_produtos(caminho_pdf)
+    if caminho_excel and st.button("🔄 Importar da Planilha", use_container_width=True):
+        qtd = processar_planilha_produtos(caminho_excel)
         if qtd > 0:
             st.success(f"✅ {qtd} produtos atualizados!")
             st.rerun()
@@ -136,10 +126,8 @@ conn.close()
 if produtos:
     st.subheader(f"Lista de Produtos ({len(produtos)} itens)")
     
-    # Busca/Filtro
     pesquisa = st.text_input("🔍 Pesquisar produto por nome ou código...", "")
     
-    # Cabeçalho
     c_cod, c_nome, c_cat, c_est, c_un, c_pr, c_act = st.columns([1.5, 4, 2, 1.5, 1, 1.5, 1])
     c_cod.markdown("**Código**")
     c_nome.markdown("**Nome do Produto**")
@@ -156,7 +144,7 @@ if produtos:
             
             col_cd.write(p.get('codigo', '-'))
             col_nm.write(f"**{p.get('nome', '-')}**")
-            col_ct.write(p.get('categoria', 'Geral'))
+            col_ct.write(p.get('categoria', 'TRANSPORTE'))
             col_es.write(f"{p.get('estoque', 0.0)}")
             col_u.write(p.get('unidade', 'UN'))
             col_pr.write(f"R$ {p.get('preco', 0.0):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
