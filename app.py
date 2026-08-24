@@ -1,4 +1,4 @@
-import sys, os, sqlite3, openpyxl, pypdf, re
+import sys, os, sqlite3, openpyxl, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
@@ -10,46 +10,66 @@ if not os.path.exists(DB_PATH):
     init_db()
 
 # ---------------------------------------------------------------------
-# ATUALIZAÇÃO AUTOMÁTICA DE PRODUTOS E FROTA (AO INICIAR)
+# IMPORTAÇÃO AUTOMÁTICA DE PRODUTOS E FROTA (DA PASTA 'DADOS')
 # ---------------------------------------------------------------------
 def rodar_atualizacao():
-    if not os.path.exists(DB_PATH): return
+    if not os.path.exists(DB_PATH): 
+        return
+        
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Atualiza Produtos do PDF
+    # 1. Carregar Veículos do Excel (dados/FROTA.xlsx ou FROTA_importada.xlsx)
+    excel_path = os.path.join("dados", "FROTA.xlsx")
+    if not os.path.exists(excel_path):
+        excel_path = os.path.join("dados", "FROTA_importada.xlsx")
+        
+    if os.path.exists(excel_path):
+        try:
+            wb = openpyxl.load_workbook(excel_path)
+            sheet = wb.active
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if row and row[0]:
+                    placa = str(row[0]).strip()
+                    propriedade = str(row[1] or '').strip()
+                    renavam = str(row[2] or '').strip()
+                    chassi = str(row[3] or '').strip()
+                    modelo = str(row[4] or '').strip()
+                    
+                    c.execute("""
+                        INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade, status)
+                        VALUES (?, ?, ?, ?, ?, 'Ativo')
+                    """, (placa, modelo, renavam, chassi, propriedade))
+        except Exception as e:
+            print(f"Erro ao importar frota: {e}")
+
+    # 2. Carregar Produtos do PDF
     pdf_path = os.path.join("dados", "286.pdf")
     if os.path.exists(pdf_path):
-        c.execute("DELETE FROM produtos;")
-        reader = pypdf.PdfReader(pdf_path)
-        for page in reader.pages:
-            for line in page.extract_text().splitlines():
-                m = re.match(r'^(\d{2,6})(.+?)\s+(\d+UN|\d+BL|\d+PT|\d+LT|\d+KG|1|UN|BL|PT|KG|LT|1 PT)\s+([\d\.\,]+)\s+([\d\.\,]+)\s*(UN|BL|PT|KG|LT)?\s*2$', line.strip())
-                if m:
-                    c.execute("INSERT INTO produtos (codigo, nome, estoque_atual, preco_unitario, unidade) VALUES (?, ?, ?, ?, ?)",
-                              (m.group(1).strip(), m.group(2).strip(), float(m.group(4).replace('.','').replace(',','.')), float(m.group(5).replace('.','').replace(',','.')), m.group(6) or "UN"))
-        # Renomeia temporariamente para não rodar novamente no próximo F5
-        os.rename(pdf_path, os.path.join("dados", "286_importado.pdf"))
-    
-    # Atualiza Veículos do Excel
-    excel_path = os.path.join("dados", "FROTA.xlsx")
-    if os.path.exists(excel_path):
-        wb = openpyxl.load_workbook(excel_path)
-        for row in wb.active.iter_rows(min_row=2, values_only=True):
-            if row[0]:
-                c.execute("INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade) VALUES (?, ?, ?, ?, ?)",
-                          (str(row[0]).strip(), str(row[4] or '').strip(), str(row[2] or '').strip(), str(row[3] or '').strip(), str(row[1] or '').strip()))
-        # Renomeia temporariamente para não rodar novamente no próximo F5
-        os.rename(excel_path, os.path.join("dados", "FROTA_importada.xlsx"))
+        try:
+            import pypdf
+            c.execute("DELETE FROM produtos;")
+            reader = pypdf.PdfReader(pdf_path)
+            for page in reader.pages:
+                for line in page.extract_text().splitlines():
+                    m = re.match(r'^(\d{2,6})(.+?)\s+(\d+UN|\d+BL|\d+PT|\d+LT|\d+KG|1|UN|BL|PT|KG|LT|1 PT)\s+([\d\.\,]+)\s+([\d\.\,]+)\s*(UN|BL|PT|KG|LT)?\s*2$', line.strip())
+                    if m:
+                        c.execute("""
+                            INSERT INTO produtos (codigo, nome, estoque_atual, preco_unitario, unidade)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (m.group(1).strip(), m.group(2).strip(), float(m.group(4).replace('.','').replace(',','.')), float(m.group(5).replace('.','').replace(',','.')), m.group(6) or "UN"))
+            os.rename(pdf_path, os.path.join("dados", "286_importado.pdf"))
+        except Exception as e:
+            print(f"Erro ao importar produtos: {e}")
         
     conn.commit()
     conn.close()
 
-# Chama a função sempre que o app inicia (mas só atualiza se achar os arquivos com o nome original)
+# Executa o carregamento
 rodar_atualizacao()
 
 # ---------------------------------------------------------------------
-# CONSULTA PÚBLICA VIA QR CODE (LEITURA POR CÂMERA SEM LOGIN)
+# CONSULTA PÚBLICA VIA QR CODE
 # ---------------------------------------------------------------------
 query_params = st.query_params
 
@@ -69,9 +89,7 @@ if "p" in query_params:
     
     if produto:
         st.success("✅ Produto Encontrado")
-        
         st.subheader(f"**{produto['nome']}**")
-        
         col1, col2 = st.columns(2)
         with col1:
             st.metric(label="Código do Produto", value=produto["codigo"])
@@ -80,18 +98,16 @@ if "p" in query_params:
             val_un = produto['preco_unitario'] if produto['preco_unitario'] else 0.0
             st.metric(label="Valor Unitário", value=f"R$ {val_un:.2f}")
     else:
-        st.error(f"❌ Produto com o código '{codigo_prod}' não foi localizado no banco de dados.")
-    
+        st.error(f"❌ Produto com o código '{codigo_prod}' não foi localizado.")
     st.stop()
 
 # ---------------------------------------------------------------------
-# ESTILIZAÇÃO DO MENU SUPERIOR (ABAS) E CENTRALIZAÇÃO DO LOGIN
+# ESTILIZAÇÃO DO LOGIN E MENU
 # ---------------------------------------------------------------------
 st.markdown(
     """
     <style>
         [data-testid="stSidebarNav"] { display: none !important; }
-        
         div[role="radiogroup"] {
             flex-direction: row !important;
             flex-wrap: wrap;
@@ -107,8 +123,6 @@ st.markdown(
         div[role="radiogroup"] label:hover {
             border-color: #60a5fa !important;
         }
-
-        /* Centralização Vertical e Alinhamento do Login */
         .login-header {
             text-align: center;
             margin-bottom: 24px;
@@ -127,15 +141,13 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------
-# LOGIN (CENTRALIZADO)
+# LOGIN
 # ---------------------------------------------------------------------
 if "usuario" not in st.session_state:
     st.session_state.usuario = None
 
 if st.session_state.usuario is None:
     st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
-    
-    # Espaçadores verticais para alinhar ao centro da página
     st.write("")
     st.write("")
     
@@ -167,7 +179,7 @@ if st.session_state.usuario is None:
     st.stop()
 
 # ---------------------------------------------------------------------
-# BARRA LATERAL (USUÁRIO E LOGOUT)
+# BARRA LATERAL
 # ---------------------------------------------------------------------
 usuario = st.session_state.usuario
 
@@ -183,7 +195,7 @@ with st.sidebar:
         st.rerun()
 
 # ---------------------------------------------------------------------
-# MENU SUPERIOR EM ABAS
+# MENU SUPERIOR
 # ---------------------------------------------------------------------
 opcoes_menu = [
     "🏠 Dashboard", "📱 Nova Saída", "📥 Nova Entrada", 
@@ -197,7 +209,6 @@ if usuario.get("role") == "admin":
 opcao_selecionada = st.radio("Navegação", opcoes_menu, label_visibility="collapsed")
 st.divider()
 
-# Mapeamento do nome do botão para o caminho exato do arquivo na pasta views
 mapa_arquivos = {
     "🏠 Dashboard": "views/dashboard.py",
     "📱 Nova Saída": "views/nova_saida.py",
@@ -211,16 +222,11 @@ mapa_arquivos = {
     "🔐 Usuários": "views/usuarios.py"
 }
 
-# ---------------------------------------------------------------------
-# EXECUÇÃO DIRETA DO ARQUIVO SELECIONADO
-# ---------------------------------------------------------------------
 caminho_arquivo = mapa_arquivos.get(opcao_selecionada)
 
 if caminho_arquivo and os.path.exists(caminho_arquivo):
     with open(caminho_arquivo, "r", encoding="utf-8") as f:
         codigo = f.read()
-    
-    # Executa o arquivo da view dentro do contexto do app principal
     exec(compile(codigo, caminho_arquivo, "exec"))
 else:
     st.error(f"O arquivo `{caminho_arquivo}` não foi encontrado na pasta `views/`.")
