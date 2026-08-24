@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, sqlite3, openpyxl, pypdf, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
@@ -8,6 +8,45 @@ st.set_page_config(page_title="Almoxarifado", page_icon="📦", layout="wide")
 
 if not os.path.exists(DB_PATH):
     init_db()
+
+# ---------------------------------------------------------------------
+# ATUALIZAÇÃO AUTOMÁTICA DE PRODUTOS E FROTA (AO INICIAR)
+# ---------------------------------------------------------------------
+def rodar_atualizacao():
+    if not os.path.exists(DB_PATH): return
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Atualiza Produtos do PDF
+    pdf_path = os.path.join("dados", "286.pdf")
+    if os.path.exists(pdf_path):
+        c.execute("DELETE FROM produtos;")
+        reader = pypdf.PdfReader(pdf_path)
+        for page in reader.pages:
+            for line in page.extract_text().splitlines():
+                m = re.match(r'^(\d{2,6})(.+?)\s+(\d+UN|\d+BL|\d+PT|\d+LT|\d+KG|1|UN|BL|PT|KG|LT|1 PT)\s+([\d\.\,]+)\s+([\d\.\,]+)\s*(UN|BL|PT|KG|LT)?\s*2$', line.strip())
+                if m:
+                    c.execute("INSERT INTO produtos (codigo, nome, estoque_atual, preco_unitario, unidade) VALUES (?, ?, ?, ?, ?)",
+                              (m.group(1).strip(), m.group(2).strip(), float(m.group(4).replace('.','').replace(',','.')), float(m.group(5).replace('.','').replace(',','.')), m.group(6) or "UN"))
+        # Renomeia temporariamente para não rodar novamente no próximo F5
+        os.rename(pdf_path, os.path.join("dados", "286_importado.pdf"))
+    
+    # Atualiza Veículos do Excel
+    excel_path = os.path.join("dados", "FROTA.xlsx")
+    if os.path.exists(excel_path):
+        wb = openpyxl.load_workbook(excel_path)
+        for row in wb.active.iter_rows(min_row=2, values_only=True):
+            if row[0]:
+                c.execute("INSERT OR REPLACE INTO veiculos (placa, modelo, renavam, chassi, propriedade) VALUES (?, ?, ?, ?, ?)",
+                          (str(row[0]).strip(), str(row[4] or '').strip(), str(row[2] or '').strip(), str(row[3] or '').strip(), str(row[1] or '').strip()))
+        # Renomeia temporariamente para não rodar novamente no próximo F5
+        os.rename(excel_path, os.path.join("dados", "FROTA_importada.xlsx"))
+        
+    conn.commit()
+    conn.close()
+
+# Chama a função sempre que o app inicia (mas só atualiza se achar os arquivos com o nome original)
+rodar_atualizacao()
 
 # ---------------------------------------------------------------------
 # CONSULTA PÚBLICA VIA QR CODE (LEITURA POR CÂMERA SEM LOGIN)
