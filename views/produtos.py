@@ -7,17 +7,14 @@ from database.db import get_connection
 st.markdown("## 📦 Gestão de Produtos")
 
 # ---------------------------------------------------------------------
-# REPARO AUTOMÁTICO DA ESTRUTURA DO BANCO DE DADOS
+# REPARO E GARANTIA DA TABELA DE PRODUTOS
 # ---------------------------------------------------------------------
 def ajustar_estrutura_tabela():
     conn = get_connection()
     c = conn.cursor()
-    
-    # Verifica colunas existentes
     c.execute("PRAGMA table_info(produtos)")
     colunas = [info[1] for info in c.fetchall()]
     
-    # Se a tabela não existe ou falta a coluna 'estoque', recria a tabela limpa
     if not colunas or 'estoque' not in colunas:
         c.execute("DROP TABLE IF EXISTS produtos")
         c.execute("""
@@ -37,15 +34,17 @@ def ajustar_estrutura_tabela():
 ajustar_estrutura_tabela()
 
 # ---------------------------------------------------------------------
-# LOCALIZADOR AUTOMÁTICO DA PLANILHA
+# LOCALIZADOR AUTOMÁTICO DA PLANILHA NO PROJETO
 # ---------------------------------------------------------------------
 def localizar_planilha():
     raiz_projeto = Path(__file__).resolve().parents[1]
-    for arquivo in raiz_projeto.rglob("planilha_estoque.xlsx"):
-        return str(arquivo)
+    for arquivo in raiz_projeto.rglob("*.xlsx"):
+        if "estoque" in arquivo.name.lower() or "planilha" in arquivo.name.lower():
+            return str(arquivo)
     
-    for arquivo in Path.cwd().rglob("planilha_estoque.xlsx"):
-        return str(arquivo)
+    for arquivo in Path.cwd().rglob("*.xlsx"):
+        if "estoque" in arquivo.name.lower() or "planilha" in arquivo.name.lower():
+            return str(arquivo)
         
     return None
 
@@ -60,38 +59,41 @@ def extrair_coluna(row, opcoes_nomes, padrao=""):
     return padrao
 
 # ---------------------------------------------------------------------
-# CARREGAMENTO E RECRIAÇÃO DO ESTOQUE
+# PROCESSAMENTO BASEADO NO NOVO LAYOUT DA PLANILHA
 # ---------------------------------------------------------------------
 def recriar_estoque_do_zero(df):
     try:
         conn = get_connection()
         c = conn.cursor()
-        
-        # Elimina os registros antigos completamente
         c.execute("DELETE FROM produtos")
         
         df.columns = [str(col).strip() for col in df.columns]
         inseridos = 0
 
         for _, row in df.iterrows():
-            codigo_raw = extrair_coluna(row, ['Código', 'Codigo', 'Cod', 'ID'], None)
+            # A: Código
+            codigo_raw = extrair_coluna(row, ['Código', 'Codigo', 'Cod'], None)
             if not codigo_raw or str(codigo_raw).strip().lower() in ['nan', 'none', '']:
                 continue
             codigo = str(codigo_raw).strip()
 
-            nome_raw = extrair_coluna(row, ['Descrição', 'Descricao', 'Nome', 'Produto', 'Item'], "PRODUTO SEM NOME")
+            # B: Descrição
+            nome_raw = extrair_coluna(row, ['Descrição', 'Descricao', 'Nome'], "PRODUTO SEM NOME")
             nome = str(nome_raw).strip()
 
-            unidade_raw = extrair_coluna(row, ['UN', 'Unidade', 'Un', 'U.M.', 'UM'], "UN")
+            # D: Un. (ou C: Emb.)
+            unidade_raw = extrair_coluna(row, ['Un.', 'Un', 'UN', 'Emb.', 'Emb'], "UN")
             unidade = str(unidade_raw).strip()
 
-            estoque_raw = extrair_coluna(row, ['Estoque', 'Qtd', 'Quantidade', 'Saldo', 'Estoque Atual'], 0.0)
+            # E: Estoque
+            estoque_raw = extrair_coluna(row, ['Estoque', 'Qtd', 'Quantidade'], 0.0)
             try:
-                estoque = float(str(estoque_raw).replace(",", "."))
+                estoque = float(str(estoque_raw).replace(".", "").replace(",", ".")) if isinstance(estoque_raw, str) else float(estoque_raw)
             except (ValueError, TypeError):
                 estoque = 0.0
 
-            preco_raw = extrair_coluna(row, ['Vl. Últ. Ent.', 'Vl. Ult. Ent.', 'Preço', 'Preco', 'Valor', 'Vl. Unit.'], 0.0)
+            # F: Últ. Ent. (Preço Unitário)
+            preco_raw = extrair_coluna(row, ['Últ. Ent.', 'Ult. Ent.', 'Últ.Ent.', 'Ult.Ent.', 'Preço', 'Preco'], 0.0)
             if pd.isna(preco_raw):
                 preco = 0.0
             elif isinstance(preco_raw, (int, float)):
@@ -118,43 +120,43 @@ def recriar_estoque_do_zero(df):
         return 0
 
 # ---------------------------------------------------------------------
-# PAINEL E IMPORTAÇÃO NATIVA
+# PAINEL E CONTROLES
 # ---------------------------------------------------------------------
 caminho_anexado = localizar_planilha()
 
 if caminho_anexado:
-    st.success(f"📌 Planilha conectada: `{caminho_anexado}`")
+    st.success(f"📌 Planilha conectada: `{os.path.basename(caminho_anexado)}`")
 else:
-    st.warning("⚠️ O arquivo `planilha_estoque.xlsx` não foi encontrado na pasta `dados`.")
+    st.warning("⚠️ Planilha não localizada automaticamente na pasta `dados`.")
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    if caminho_anexado and st.button("🔄 Substituir Todo o Estoque Pela Planilha", type="primary", use_container_width=True):
+    if caminho_anexado and st.button("🔄 Importar / Sincronizar Planilha", type="primary", use_container_width=True):
         df_local = pd.read_excel(caminho_anexado)
         qtd = recriar_estoque_do_zero(df_local)
         if qtd > 0:
-            st.success(f"✅ Sucesso! {qtd} produtos carregados da planilha local!")
+            st.success(f"✅ {qtd} produtos atualizados com sucesso!")
             st.rerun()
 
 with col2:
-    if st.button("🗑️ Zerar Todo o Banco", use_container_width=True):
+    if st.button("🗑️ Zerar Banco de Dados", use_container_width=True):
         conn = get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM produtos")
         conn.commit()
         conn.close()
-        st.warning("Estoque completamente limpo!")
+        st.warning("Banco zerado!")
         st.rerun()
 
 st.markdown("---")
 
 # ---------------------------------------------------------------------
-# LISTAGEM DE PRODUTOS
+# LISTAGEM EM FORMATO DE TABELA
 # ---------------------------------------------------------------------
 conn = get_connection()
 c = conn.cursor()
-c.execute("SELECT * FROM produtos ORDER BY id DESC")
+c.execute("SELECT * FROM produtos ORDER BY id ASC")
 produtos = [dict(r) for r in c.fetchall()]
 conn.close()
 
@@ -163,26 +165,30 @@ if produtos:
     
     pesquisa = st.text_input("🔍 Pesquisar produto por nome ou código...", "")
     
-    c_cod, c_nome, c_cat, c_est, c_un, c_pr, c_act = st.columns([1.5, 4, 2, 1.5, 1, 1.5, 1])
+    c_cod, c_nome, c_un, c_est, c_pr, c_tot, c_act = st.columns([1.5, 4, 1, 1.5, 1.5, 1.5, 1])
     c_cod.markdown("**Código**")
-    c_nome.markdown("**Nome do Produto**")
-    c_cat.markdown("**Categoria**")
+    c_nome.markdown("**Descrição**")
+    c_un.markdown("**Un.**")
     c_est.markdown("**Estoque**")
-    c_un.markdown("**UN**")
-    c_pr.markdown("**Preço Un.**")
+    c_pr.markdown("**Últ. Ent.**")
+    c_tot.markdown("**Valor Total**")
     c_act.markdown("**Ação**")
     st.divider()
 
     for p in produtos:
         if pesquisa.lower() in str(p['codigo']).lower() or pesquisa.lower() in str(p['nome']).lower():
-            col_cd, col_nm, col_ct, col_es, col_u, col_pr, col_bt = st.columns([1.5, 4, 2, 1.5, 1, 1.5, 1])
+            col_cd, col_nm, col_u, col_es, col_pr, col_tot, col_bt = st.columns([1.5, 4, 1, 1.5, 1.5, 1.5, 1])
+            
+            qtd_est = float(p.get('estoque', 0.0))
+            prc_un = float(p.get('preco', 0.0))
+            val_tot = qtd_est * prc_un
             
             col_cd.write(p.get('codigo', '-'))
             col_nm.write(f"**{p.get('nome', '-')}**")
-            col_ct.write(p.get('categoria', 'TRANSPORTE'))
-            col_es.write(f"{p.get('estoque', 0.0)}")
             col_u.write(p.get('unidade', 'UN'))
-            col_pr.write(f"R$ {p.get('preco', 0.0):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            col_es.write(f"{qtd_est:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            col_pr.write(f"R$ {prc_un:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            col_tot.write(f"R$ {val_tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
             
             if col_bt.button("🗑️", key=f"del_prod_{p['id']}"):
                 conn = get_connection()
