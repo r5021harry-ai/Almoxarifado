@@ -28,6 +28,18 @@ def garantir_tabela_produtos():
 garantir_tabela_produtos()
 
 # ---------------------------------------------------------------------
+# AUXILIAR PARA PEGAR VALOR DE COLUNA DE FORMA SEGURA
+# ---------------------------------------------------------------------
+def obter_valor(row, nomes_possiveis, padrao=""):
+    """Busca um valor no Dataframe testando variações de nomes de colunas."""
+    for col in row.index:
+        if str(col).strip().lower() in [n.lower() for n in nomes_possiveis]:
+            val = row[col]
+            if pd.notnull(val):
+                return val
+    return padrao
+
+# ---------------------------------------------------------------------
 # PROCESSADOR DA PLANILHA EXCEL
 # ---------------------------------------------------------------------
 def processar_df_produtos(df):
@@ -37,19 +49,29 @@ def processar_df_produtos(df):
         inseridos = 0
 
         for _, row in df.iterrows():
-            codigo = str(row['Código']).strip() if pd.notnull(row['Código']) else None
-            if not codigo or codigo.lower() in ['nan', 'none', '']:
+            # Busca código (Código, Codigo, Cod)
+            codigo_raw = obter_valor(row, ['Código', 'Codigo', 'Cod'], None)
+            if not codigo_raw or str(codigo_raw).strip().lower() in ['nan', 'none', '']:
                 continue
+            codigo = str(codigo_raw).strip()
 
-            nome = str(row['Descrição']).strip() if pd.notnull(row['Descrição']) else "PRODUTO SEM NOME"
-            unidade = str(row['UN']).strip() if pd.notnull(row['UN']) else "UN"
-            
+            # Busca descrição/nome (Descrição, Descricao, Nome, Produto)
+            nome_raw = obter_valor(row, ['Descrição', 'Descricao', 'Nome', 'Produto'], "PRODUTO SEM NOME")
+            nome = str(nome_raw).strip()
+
+            # Busca unidade de medida (UN, Unidade, Un, U.M., UM)
+            unidade_raw = obter_valor(row, ['UN', 'Unidade', 'Un', 'U.M.', 'UM'], "UN")
+            unidade = str(unidade_raw).strip()
+
+            # Busca estoque (Estoque, Qtd, Quantidade, Saldo)
+            estoque_raw = obter_valor(row, ['Estoque', 'Qtd', 'Quantidade', 'Saldo'], 0.0)
             try:
-                estoque = float(row['Estoque']) if pd.notnull(row['Estoque']) else 0.0
+                estoque = float(estoque_raw)
             except (ValueError, TypeError):
                 estoque = 0.0
 
-            preco_val = row.get('Vl. Últ. Ent.', 0.0)
+            # Busca preço (Vl. Últ. Ent., Preço, Preco, Vl. Unit., Valor)
+            preco_val = obter_valor(row, ['Vl. Últ. Ent.', 'Vl. Ult. Ent.', 'Preço', 'Preco', 'Valor', 'Vl. Unit.'], 0.0)
             if pd.isna(preco_val):
                 preco = 0.0
             elif isinstance(preco_val, (int, float)):
@@ -88,20 +110,18 @@ col_up, col_btn = st.columns([3, 1])
 with col_up:
     arquivo_enviado = st.file_uploader("📂 Envie ou selecione a planilha de estoque (.xlsx)", type=["xlsx"])
 
-# Tenta carregar do upload OU direto da pasta local se o arquivo existir
 df_para_importar = None
 
 if arquivo_enviado:
     df_para_importar = pd.read_excel(arquivo_enviado)
 else:
-    # Procura na pasta local como fallback
     caminho_local = os.path.join(os.getcwd(), "dados", "planilha_estoque.xlsx")
     if os.path.exists(caminho_local):
         df_para_importar = pd.read_excel(caminho_local)
         st.info("📊 Planilha encontrada automaticamente na pasta `dados`.")
 
 with col_btn:
-    st.write("") # Espaçamento
+    st.write("")
     st.write("")
     if st.button("🗑️ Limpar Banco", use_container_width=True):
         conn = get_connection()
