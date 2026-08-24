@@ -34,7 +34,7 @@ def ajustar_estrutura_tabela():
         conn.commit()
     conn.close()
 
-ajustAR_estrutura_tabela()
+ajustar_estrutura_tabela()
 
 # ---------------------------------------------------------------------
 # LOCALIZADOR AUTOMÁTICO DA PLANILHA
@@ -67,7 +67,7 @@ def recriar_estoque_do_zero(df):
         conn = get_connection()
         c = conn.cursor()
         
-        # Elimina os registros existentes completamente
+        # Elimina os registros antigos completamente
         c.execute("DELETE FROM produtos")
         
         df.columns = [str(col).strip() for col in df.columns]
@@ -123,7 +123,7 @@ def recriar_estoque_do_zero(df):
 caminho_anexado = localizar_planilha()
 
 if caminho_anexado:
-    st.success(f"📌 Planilha conectada da pasta 'dados': `{caminho_anexado}`")
+    st.success(f"📌 Planilha conectada: `{caminho_anexado}`")
 else:
     st.warning("⚠️ O arquivo `planilha_estoque.xlsx` não foi encontrado na pasta `dados`.")
 
